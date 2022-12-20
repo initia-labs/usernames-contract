@@ -1,41 +1,3 @@
-module name_service::metadata {
-    use std::string::String;
-
-    friend name_service::name_service_v0_3;
-
-    struct Metadata has drop, store, copy {
-        expiration_date: u64,
-        name: String,
-        record_keys: vector<String>,
-        record_values: vector<String>,
-    }
-
-    public(friend) fun new(
-        expiration_date: u64,
-        name: String,
-        record_keys: vector<String>,
-        record_values: vector<String>,
-    ): Metadata {
-        Metadata {
-            expiration_date,
-            name,
-            record_keys,
-            record_values,
-        }
-    }
-
-    public(friend) fun update_expiration_date(
-        metadata: &mut Metadata,
-        new_expiration_date: u64,
-    ) {
-        metadata.expiration_date = new_expiration_date;
-    }
-
-    public fun get_expiration_date(metadata: &Metadata): u64 {
-        metadata.expiration_date
-    }
-}
-
 module name_service::name_service {
     use std::error;
     use std::string::{Self, String};
@@ -46,11 +8,11 @@ module name_service::name_service {
     use initia_std::coin::{Self, Coin};
     use initia_std::decimal;
     use initia_std::native_uinit;
+    use initia_std::nft;
     use initia_std::option::{Self, Option};
     use initia_std::table::{Self, Table};
 
     use name_service::metadata::{Self, Metadata};
-    use name_service::nft;
 
     /// Only chain can execute.
     const EUNAUTHORIZED: u64 = 0;
@@ -108,11 +70,17 @@ module name_service::name_service {
         price_per_year_3char: u64,
         price_per_year_4char: u64,
         price_per_year_default: u64,
-
         min_duration: u64,
-
         grace_period: u64,
+        base_uri: String,
+    }
 
+    struct ConfigResponse has drop {
+        price_per_year_3char: u64,
+        price_per_year_4char: u64,
+        price_per_year_default: u64,
+        min_duration: u64,
+        grace_period: u64,
         base_uri: String,
     }
 
@@ -140,8 +108,21 @@ module name_service::name_service {
         addr
     }
 
+    public entry fun get_config(): ConfigResponse acquires ModuleStore {
+        let module_store = borrow_global<ModuleStore>(@name_service);
+
+        ConfigResponse {
+            price_per_year_3char: module_store.config.price_per_year_3char,
+            price_per_year_4char: module_store.config.price_per_year_4char,
+            price_per_year_default: module_store.config.price_per_year_default,
+            min_duration: module_store.config.min_duration,
+            grace_period: module_store.config.grace_period,
+            base_uri: module_store.config.base_uri,
+        }
+    }
+
     /// return (price_per_year_3char, price_per_year_4char, price_per_year_default, min_duration, grace_period, base_uri)
-    public entry fun get_config(): (u64, u64, u64, u64, u64, String) acquires ModuleStore {
+    public fun get_config_params(): (u64, u64, u64, u64, u64, String) acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
 
         (
@@ -365,6 +346,43 @@ module name_service::name_service {
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
 
         coin::merge(&mut module_store.pool, cost);
+    }
+
+    public entry fun update_records(
+        account: &signer,
+        domain_name: String,
+        record_keys: vector<String>,
+        record_values: vector<String>,
+    ) acquires ModuleStore {
+        let addr = signer::address_of(account);
+        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
+        assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
+
+        let nft_info = nft::get_token_info<Metadata>(token_id);
+        let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+
+        metadata::update_records(&mut extension, record_keys, record_values);
+
+        nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
+    }
+
+    public entry fun delete_records(
+        account: &signer,
+        domain_name: String,
+        record_keys: vector<String>,
+    ) acquires ModuleStore {
+        let addr = signer::address_of(account);
+        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
+        assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
+
+        let nft_info = nft::get_token_info<Metadata>(token_id);
+        let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+
+        metadata::delete_records(&mut extension, record_keys);
+
+        nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
     }
 
     fun check_name(name: String) {

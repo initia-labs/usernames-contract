@@ -5,7 +5,7 @@ version = "0.0.1"
 [addresses]
 std = "0x1"
 initia_std = "0x1"
-name_service = "0xfa5F07319724580eF16DCEF6Ce4d3b0BD0348E48"
+name_service = "_"
 
 [dev-addresses]
 name_service = "0x2"
