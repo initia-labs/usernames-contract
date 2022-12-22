@@ -47,7 +47,6 @@ module name_service::metadata {
         let key_length = vector::length(&record_keys);
         let value_length = vector::length(&record_values);
         assert!(key_length == value_length, error::invalid_argument(ELENGTH_MISMATCH));
-
         let index = 0;
         while(index < key_length) {
             let (e, i) = vector::index_of(&metadata.record_keys, vector::borrow(&record_keys, index));
@@ -57,7 +56,8 @@ module name_service::metadata {
             } else {
                 vector::push_back(&mut metadata.record_keys, *vector::borrow(&record_keys, index));
                 vector::push_back(&mut metadata.record_values, *vector::borrow(&record_values, index));
-            }
+            };
+            index = index + 1;
         };
 
         assert!(vector::length(&metadata.record_keys) <= MAX_RECORD, error::invalid_state(EMAX_RECORD_EXCEED));
@@ -74,6 +74,7 @@ module name_service::metadata {
             assert!(e, error::not_found(EKEY_NOT_FOUND));
             vector::remove(&mut metadata.record_keys, i);
             vector::remove(&mut metadata.record_values, i);
+            index = index + 1;
         };
     }
 

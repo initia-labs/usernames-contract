@@ -366,7 +366,6 @@ module name_service::name_service {
 
         let nft_info = nft::get_token_info<Metadata>(token_id);
         let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
-
         metadata::update_records(&mut extension, record_keys, record_values);
 
         nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
@@ -530,6 +529,19 @@ module name_service::name_service {
         set_name(&user1, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr1) == string::utf8(b"abcd"), 0);
         assert!(get_address_from_name(string::utf8(b"abcd")) == addr1, 0);
+
+        update_records(
+            &user1,
+            string::utf8(b"abcd"),
+            vector[string::utf8(b"height"), string::utf8(b"weight")],
+            vector[string::utf8(b"190cm"), string::utf8(b"80kg")]
+        );
+
+        delete_records(
+             &user1,
+            string::utf8(b"abcd"),
+            vector[string::utf8(b"weight")],
+        )
     }
 
     #[test]
