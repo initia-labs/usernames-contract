@@ -224,6 +224,8 @@ module name_service::name_service {
 
         let (_height, timestamp) = block::get_block_info();
 
+        domain_name = to_lower_case(&domain_name);
+
         if (table::contains(&module_store.name_to_id, domain_name)) {
             let token_id = *table::borrow(&module_store.name_to_id, domain_name);
             let nft_info = nft::get_token_info<Metadata>(token_id);
@@ -291,6 +293,7 @@ module name_service::name_service {
     ) acquires ModuleStore {
         let addr = signer::address_of(account);
         let (_height, timestamp) = block::get_block_info();
+        domain_name = to_lower_case(&domain_name);
 
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
@@ -323,6 +326,7 @@ module name_service::name_service {
         duration: u64,
     ) acquires ModuleStore {
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         let nft_info = nft::get_token_info<Metadata>(token_id);
         let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
@@ -356,6 +360,7 @@ module name_service::name_service {
     ) acquires ModuleStore {
         let addr = signer::address_of(account);
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
 
@@ -374,6 +379,7 @@ module name_service::name_service {
     ) acquires ModuleStore {
         let addr = signer::address_of(account);
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
 
@@ -434,6 +440,21 @@ module name_service::name_service {
             &decimal::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
             (price_per_year as u128),
         ) as u64)
+    }
+
+    fun to_lower_case(str: &String): String {
+        let bytes = *string::bytes(str);
+        let len = vector::length(&bytes);
+        let index = 0;
+        while (index < len) {
+            let char = vector::borrow_mut(&mut bytes, index);
+            if (*char >= 65 && *char <= 90) {
+                *char = *char + 32
+            };
+            index = index + 1;
+        };
+
+        return string::utf8(bytes)
     }
 
     #[test(chain = @0x1, source = @name_service, user1 = @0x2, user2 = @0x3)]
@@ -509,5 +530,11 @@ module name_service::name_service {
         set_name(&user1, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr1) == string::utf8(b"abcd"), 0);
         assert!(get_address_from_name(string::utf8(b"abcd")) == addr1, 0);
+    }
+
+    #[test]
+    fun test_to_lower_case() {
+        let name = string::utf8(b"AbCd");
+        assert!(to_lower_case(&name) == string::utf8(b"abcd"), 0);
     }
 }
