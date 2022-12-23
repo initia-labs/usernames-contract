@@ -287,6 +287,19 @@ module name_service::name_service {
         coin::merge(&mut module_store.pool, cost);
     }
 
+    public entry fun unset_name(
+        account: &signer,
+    ) acquires ModuleStore {
+        let addr = signer::address_of(account);
+
+        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+
+        if (table::contains(&module_store.addr_to_name, addr)) {
+            let removed_name = table::remove(&mut module_store.addr_to_name, addr);
+            table::remove(&mut module_store.name_to_addr, removed_name);
+        };
+    }
+
     public entry fun set_name(
         account: &signer,
         domain_name: String,
