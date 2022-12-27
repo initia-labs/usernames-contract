@@ -1,5 +1,6 @@
 module name_service::name_service {
     use std::error;
+    use std::event::{Self, EventHandle};
     use std::string::{Self, String};
     use std::signer;
     use std::vector;
@@ -29,28 +30,36 @@ module name_service::name_service {
     /// name length must be more bigger than or equal to 3
     const EMIN_NAME_LENGTH: u64 = 5;
 
+    /// name length must be more bigger than or equal to 3
+    const EMAX_NAME_LENGTH: u64 = 6;
+
     /// invalid charactor
-    const EINVALID_CHARACTOR: u64 = 6;
+    const EINVALID_CHARACTOR: u64 = 7;
 
     /// not an owner of the token
-    const ENOT_OWNER: u64 = 7;
+    const ENOT_OWNER: u64 = 8;
 
     /// token is expired
-    const ETOKEN_EXPIRED: u64 = 8;
+    const ETOKEN_EXPIRED: u64 = 9;
 
     /// token id not found
-    const ETOKEN_ID_NOT_FOUND: u64 = 9;
+    const ETOKEN_ID_NOT_FOUND: u64 = 10;
 
     /// name not found
-    const ENAME_NOT_FOUND: u64 = 10;
+    const ENAME_NOT_FOUND: u64 = 11;
 
     ///  address not found
-    const EADDRESS_NOT_FOUND: u64 = 11;
+    const EADDRESS_NOT_FOUND: u64 = 12;
+
+    const EEVENT_STORE_ALREADY_PUBLISHED: u64 = 13;
+    const EEVENT_STORE_NOT_PUBLISHED: u64 = 14;
 
     /// constants
     const YEAR_TO_SECOND: u64 = 31557600; // 365.25 * 24 * 60 * 60
 
     const TLD: vector<u8> =b".init";
+
+    const MAX_LENGTH: u64 = 1000;
 
     struct ModuleStore has key {
         name_to_id: Table<String, String>,
@@ -64,6 +73,45 @@ module name_service::name_service {
         pool: Coin<native_uinit::Coin>,
 
         config: Config,
+    }
+
+    struct Events has key {
+        register_events: EventHandle<RegisterEvent>,
+        unset_events: EventHandle<UnsetEvent>,
+        set_events: EventHandle<SetEvent>,
+        extend_events: EventHandle<ExtendEvent>,
+        update_records_events: EventHandle<UpdateRecordsEvent>,
+        delete_records_events: EventHandle<DeleteRecordsEvent>,
+    }
+
+    struct RegisterEvent has drop, store {
+        domain_name: String,
+        token_id: String,
+        expiration_date: u64,
+    }
+
+    struct UnsetEvent has drop, store {
+        domain_name: String,
+    }
+
+    struct SetEvent has drop, store {
+        domain_name: String,
+    }
+
+    struct ExtendEvent has drop, store {
+        domain_name: String,
+        expiration_date: u64,
+    }
+
+    struct UpdateRecordsEvent has drop, store {
+        domain_name: String,
+        keys: vector<String>,
+        values: vector<String>,
+    }
+
+    struct DeleteRecordsEvent has drop, store {
+        domain_name: String,
+        keys: vector<String>,
     }
 
     struct Config has store {
@@ -133,6 +181,10 @@ module name_service::name_service {
             module_store.config.grace_period,
             module_store.config.base_uri,
         )
+    }
+
+    public fun is_event_store_published(account_addr: address): bool {
+        exists<Events>(account_addr)
     }
 
     /// Initialize, Make global store
@@ -213,12 +265,39 @@ module name_service::name_service {
         };
     }
 
+    public entry fun publish_event_store(
+        account: &signer,
+    ) {
+        let account_addr = signer::address_of(account);
+        assert!(
+            !is_event_store_published(account_addr),
+            error::already_exists(EEVENT_STORE_ALREADY_PUBLISHED),
+        );
+
+        let evnet_store = Events {
+            register_events: event::new_event_handle<RegisterEvent>(account),
+            unset_events: event::new_event_handle<UnsetEvent>(account),
+            set_events: event::new_event_handle<SetEvent>(account),
+            extend_events: event::new_event_handle<ExtendEvent>(account),
+            update_records_events: event::new_event_handle<UpdateRecordsEvent>(account),
+            delete_records_events: event::new_event_handle<DeleteRecordsEvent>(account),
+        };
+        move_to(account, evnet_store);
+    }
+
     public entry fun register_domain(
         account: &signer,
         domain_name: String,
         duration: u64,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
+        assert!(
+            is_event_store_published(addr),
+            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
+        );
+
+        let event_store = borrow_global_mut<Events>(addr);
+
         // check expiration
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
 
@@ -285,26 +364,55 @@ module name_service::name_service {
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
 
         coin::merge(&mut module_store.pool, cost);
+
+        event::emit_event<RegisterEvent>(
+            &mut event_store.register_events,
+            RegisterEvent {
+                domain_name,
+                token_id,
+                expiration_date: timestamp + duration,
+            },
+        );
     }
 
     public entry fun unset_name(
         account: &signer,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
+        assert!(
+            is_event_store_published(addr),
+            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
+        );
+
+        let event_store = borrow_global_mut<Events>(addr);
 
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
 
         if (table::contains(&module_store.addr_to_name, addr)) {
             let removed_name = table::remove(&mut module_store.addr_to_name, addr);
             table::remove(&mut module_store.name_to_addr, removed_name);
+
+            event::emit_event<UnsetEvent>(
+                &mut event_store.unset_events,
+                UnsetEvent {
+                    domain_name: removed_name,
+                },
+            );
         };
     }
 
     public entry fun set_name(
         account: &signer,
         domain_name: String,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
+        assert!(
+            is_event_store_published(addr),
+            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
+        );
+
+        let event_store = borrow_global_mut<Events>(addr);
+
         let (_height, timestamp) = block::get_block_info();
         domain_name = to_lower_case(&domain_name);
 
@@ -331,13 +439,28 @@ module name_service::name_service {
 
         table::add(&mut module_store.name_to_addr, domain_name, addr);
         table::add(&mut module_store.addr_to_name, addr, domain_name);
+
+        event::emit_event<SetEvent>(
+            &mut event_store.set_events,
+            SetEvent {
+                domain_name,
+            },
+        );
     }
 
     public entry fun extend_expiration(
         account: &signer,
         domain_name: String,
         duration: u64,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
+        let addr = signer::address_of(account);
+        assert!(
+            is_event_store_published(addr),
+            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
+        );
+
+        let event_store = borrow_global_mut<Events>(addr);
+
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
@@ -363,6 +486,14 @@ module name_service::name_service {
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
 
         coin::merge(&mut module_store.pool, cost);
+
+        event::emit_event<ExtendEvent>(
+            &mut event_store.extend_events,
+            ExtendEvent {
+                domain_name,
+                expiration_date: new_expiration_date,
+            },
+        );
     }
 
     public entry fun update_records(
@@ -370,8 +501,14 @@ module name_service::name_service {
         domain_name: String,
         record_keys: vector<String>,
         record_values: vector<String>,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
+        assert!(
+            is_event_store_published(addr),
+            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
+        );
+
+        let event_store = borrow_global_mut<Events>(addr);
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
@@ -382,14 +519,29 @@ module name_service::name_service {
         metadata::update_records(&mut extension, record_keys, record_values);
 
         nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
+
+        event::emit_event<UpdateRecordsEvent>(
+            &mut event_store.update_records_events,
+            UpdateRecordsEvent {
+                domain_name,
+                keys: record_keys,
+                values: record_values,
+            },
+        );
     }
 
     public entry fun delete_records(
         account: &signer,
         domain_name: String,
         record_keys: vector<String>,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
+        assert!(
+            is_event_store_published(addr),
+            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
+        );
+
+        let event_store = borrow_global_mut<Events>(addr);
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
@@ -401,12 +553,20 @@ module name_service::name_service {
         metadata::delete_records(&mut extension, record_keys);
 
         nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
+        event::emit_event<DeleteRecordsEvent>(
+            &mut event_store.delete_records_events,
+            DeleteRecordsEvent {
+                domain_name,
+                keys: record_keys,
+            },
+        );
     }
 
     fun check_name(name: String) {
         let bytes = string::bytes(&name);
         let len = vector::length(bytes);
         assert!(len >= 3, error::invalid_argument(EMIN_NAME_LENGTH));
+        assert!(len <= MAX_LENGTH, error::invalid_argument(EMIN_NAME_LENGTH));
         let index = 0;
         while (index < len) {
             let char = *vector::borrow(bytes, index);
@@ -475,7 +635,7 @@ module name_service::name_service {
         source: signer,
         user1: signer,
         user2: signer,
-    ) acquires ModuleStore {
+    ) acquires Events, ModuleStore {
         coin::initialize_for_chain<native_uinit::Coin>(
             &chain,
             std::string::utf8(b"name"),
@@ -500,6 +660,9 @@ module name_service::name_service {
 
         nft::register<Metadata>(&user1);
         nft::register<Metadata>(&user2);
+
+        publish_event_store(&user1);
+        publish_event_store(&user2);
 
         std::unit_test::set_block_info_for_testing(100, 100);
 
