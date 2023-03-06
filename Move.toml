@@ -11,4 +11,4 @@ name_service = "_"
 name_service = "0x2"
 
 [dependencies]
-InitiaStdlib = { local = "../../../initia/initiavm/crates/stdlib/src/initia_stdlib" }
+InitiaStdlib = { local = "../initiavm/crates/stdlib/src/initia_stdlib" }
