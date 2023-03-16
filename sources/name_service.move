@@ -7,7 +7,7 @@ module name_service::name_service {
 
     use initia_std::block;    
     use initia_std::coin::{Self, Coin};
-    use initia_std::decimal;
+    use initia_std::decimal128;
     use initia_std::dex;
     use initia_std::native_uinit;
     use initia_std::nft;
@@ -69,7 +69,7 @@ module name_service::name_service {
 
         addr_to_name: Table<address, String>,
 
-        mint_cap: nft::MintCapability<Metadata>,
+        mint_cap: nft::Capability<Metadata>,
 
         pool: Coin<native_uinit::Coin>,
 
@@ -133,30 +133,45 @@ module name_service::name_service {
         base_uri: String,
     }
 
-    public entry fun get_valid_token_id(domain_name: String): String acquires ModuleStore {
+    public entry fun get_valid_token_id(domain_name: String): Option<String> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
-        assert!(table::contains(&module_store.name_to_id, domain_name), error::not_found(ETOKEN_ID_NOT_FOUND));
-        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
+        let id = if (table::contains(&module_store.name_to_id, domain_name)) {
+            option::some(*table::borrow(&module_store.name_to_id, domain_name))
+        } else {
+            option::none()
+        };
 
-        token_id
+        id
     }
 
-    public entry fun get_name_from_address(addr: address): String acquires ModuleStore {
+    public entry fun get_name_from_address(addr: address): Option<String> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
-        assert!(table::contains(&module_store.addr_to_name, addr), error::not_found(ENAME_NOT_FOUND));
-        let domain_name = *table::borrow(&module_store.addr_to_name, addr);
-        let token_id = get_valid_token_id(domain_name);
+        let name = if (table::contains(&module_store.addr_to_name, addr)) {
+            let name = *table::borrow(&module_store.addr_to_name, addr);
+            if (is_expired(name)) {
+                option::none()
+            } else {
+                option::some(name)
+            }
+        } else {
+            option::none()
+        };
 
-        let nft_info = nft::get_token_info<Metadata>(token_id);
-        let extension = nft::get_extenssion_from_token_info_response<Metadata>(&nft_info);
-
-        domain_name
+        name
     }
 
-    public entry fun get_address_from_name(name: String): address acquires ModuleStore {
+    public entry fun get_address_from_name(name: String): Option<address> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
-        assert!(table::contains(&module_store.name_to_addr, name), error::not_found(EADDRESS_NOT_FOUND));
-        let addr = *table::borrow(&module_store.name_to_addr, name);
+        let addr = if (table::contains(&module_store.name_to_addr, name)) {
+            if (is_expired(name)) {
+                option::none()
+            } else {
+                let module_store = borrow_global<ModuleStore>(@name_service);
+                option::some(*table::borrow(&module_store.name_to_addr, name))
+            }
+        } else {
+            option::none()
+        };
 
         addr
     }
@@ -221,9 +236,9 @@ module name_service::name_service {
         move_to(
             chain,
             ModuleStore {
-                name_to_id: table::new(chain),
-                name_to_addr: table::new(chain),
-                addr_to_name: table::new(chain),
+                name_to_id: table::new(),
+                name_to_addr: table::new(),
+                addr_to_name: table::new(),
                 mint_cap,
                 pool: coin::zero(),
                 config: Config {
@@ -307,6 +322,10 @@ module name_service::name_service {
             error::not_found(EEVENT_STORE_NOT_PUBLISHED),
         );
 
+        if (!nft::is_account_registered<Metadata>(addr)) {
+            nft::register<Metadata>(account);
+        };
+
         let event_store = borrow_global_mut<Events>(addr);
 
         // check expiration
@@ -318,8 +337,8 @@ module name_service::name_service {
 
         if (table::contains(&module_store.name_to_id, domain_name)) {
             let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-            let nft_info = nft::get_token_info<Metadata>(token_id);
-            let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+            let nft_info = nft::get_nft_info<Metadata>(token_id);
+            let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
             let expiration_date = metadata::get_expiration_date(&extension);
 
             assert!(
@@ -365,7 +384,8 @@ module name_service::name_service {
         let token_id = domain_name;
         string::append(&mut token_id, string::utf8(b":"));
         string::append(&mut token_id, u64_to_string(timestamp));
-        nft::mint(account, addr, token_id, token_uri, extension, &module_store.mint_cap,);
+        let nft = nft::mint(account, token_id, token_uri, extension, &module_store.mint_cap);
+        nft::deposit(addr, nft);
         table::add(&mut module_store.name_to_id, domain_name, token_id);
 
         let cost_amount = get_cost_amount(domain_name, duration);
@@ -431,8 +451,8 @@ module name_service::name_service {
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
 
-        let nft_info = nft::get_token_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+        let nft_info = nft::get_nft_info<Metadata>(token_id);
+        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
         assert!(
             metadata::get_expiration_date(&extension) > timestamp,
             error::permission_denied(ETOKEN_EXPIRED),
@@ -475,8 +495,8 @@ module name_service::name_service {
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-        let nft_info = nft::get_token_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+        let nft_info = nft::get_nft_info<Metadata>(token_id);
+        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
 
         let (_height, timestamp) = block::get_block_info();
         let expiration_date = metadata::get_expiration_date(&extension);
@@ -525,8 +545,8 @@ module name_service::name_service {
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
 
-        let nft_info = nft::get_token_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+        let nft_info = nft::get_nft_info<Metadata>(token_id);
+        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
         metadata::update_records(&mut extension, record_keys, record_values);
 
         nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
@@ -558,8 +578,8 @@ module name_service::name_service {
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
 
-        let nft_info = nft::get_token_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_token_info_response<Metadata>(&nft_info);
+        let nft_info = nft::get_nft_info<Metadata>(token_id);
+        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
 
         metadata::delete_records(&mut extension, record_keys);
 
@@ -621,17 +641,17 @@ module name_service::name_service {
 
         let spot_price = dex::get_spot_price<initia_std::native_uusdc::Coin>();
 
-        let usd_value = (decimal::mul(
-            &decimal::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
+        let usd_value = (decimal128::mul(
+            &decimal128::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
             (price_per_year as u128),
         ) as u64);
 
-        let decimal_price = decimal::from_ratio(
+        let decimal128_price = decimal128::from_ratio(
             (usd_value as u128),
-            decimal::val(&spot_price),
+            decimal128::val(&spot_price),
         );
 
-        (decimal::mul(&decimal_price, decimal::val(&decimal::one())) as u64)
+        (decimal128::mul(&decimal128_price, decimal128::val(&decimal128::one())) as u64)
     }
 
     fun to_lower_case(str: &String): String {
@@ -647,6 +667,15 @@ module name_service::name_service {
         };
 
         return string::utf8(bytes)
+    }
+
+    fun is_expired(name: String): bool acquires ModuleStore {
+        let token_id = get_valid_token_id(name);
+        let nft_info = nft::get_nft_info<Metadata>(option::extract(&mut token_id));
+        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
+        let expiration_date = metadata::get_expiration_date(&extension);
+        let (_height, timestamp) = block::get_block_info();
+        timestamp > expiration_date
     }
 
 //     // TODO fix test (tip. create pool, provide liquidity)

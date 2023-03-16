@@ -5,10 +5,10 @@ version = "0.0.1"
 [addresses]
 std = "0x1"
 initia_std = "0x1"
-name_service = "_"
+name_service = "0x7de0de4f4a289ec455f0eb4a496dfa3dbae3a375"
 
 [dev-addresses]
 name_service = "0x2"
 
 [dependencies]
-InitiaStdlib = { local = "../initiavm/crates/stdlib/src/initia_stdlib" }
+InitiaStdlib = { local = "../../backends/initiavm/crates/stdlib/src/initia_stdlib" }
