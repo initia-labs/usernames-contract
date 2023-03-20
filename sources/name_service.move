@@ -133,7 +133,8 @@ module name_service::name_service {
         base_uri: String,
     }
 
-    public entry fun get_valid_token_id(domain_name: String): Option<String> acquires ModuleStore {
+    #[view]
+    public fun get_valid_token_id(domain_name: String): Option<String> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
         let id = if (table::contains(&module_store.name_to_id, domain_name)) {
             option::some(*table::borrow(&module_store.name_to_id, domain_name))
@@ -144,7 +145,8 @@ module name_service::name_service {
         id
     }
 
-    public entry fun get_name_from_address(addr: address): Option<String> acquires ModuleStore {
+    #[view]
+    public fun get_name_from_address(addr: address): Option<String> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
         let name = if (table::contains(&module_store.addr_to_name, addr)) {
             let name = *table::borrow(&module_store.addr_to_name, addr);
@@ -160,7 +162,8 @@ module name_service::name_service {
         name
     }
 
-    public entry fun get_address_from_name(name: String): Option<address> acquires ModuleStore {
+    #[view]
+    public fun get_address_from_name(name: String): Option<address> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
         let addr = if (table::contains(&module_store.name_to_addr, name)) {
             if (is_expired(name)) {
@@ -176,7 +179,8 @@ module name_service::name_service {
         addr
     }
 
-    public entry fun get_config(): ConfigResponse acquires ModuleStore {
+    #[view]
+    public fun get_config(): ConfigResponse acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@name_service);
 
         ConfigResponse {
@@ -189,7 +193,8 @@ module name_service::name_service {
         }
     }
 
-    public entry fun get_init_cost(domain_name: String, duration: u64): u64 acquires ModuleStore {
+    #[view]
+    public fun get_init_cost(domain_name: String, duration: u64): u64 acquires ModuleStore {
         get_cost_amount(domain_name, duration)
     }
 
