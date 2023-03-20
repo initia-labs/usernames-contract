@@ -322,10 +322,10 @@ module name_service::name_service {
         duration: u64,
     ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
-        assert!(
-            is_event_store_published(addr),
-            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
-        );
+
+        if (!is_event_store_published(addr)) {
+            publish_event_store(account)
+        };
 
         if (!nft::is_account_registered<Metadata>(addr)) {
             nft::register<Metadata>(account);
@@ -415,6 +415,7 @@ module name_service::name_service {
         account: &signer,
     ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
+        // impossible to not get event store
         assert!(
             is_event_store_published(addr),
             error::not_found(EEVENT_STORE_NOT_PUBLISHED),
@@ -442,10 +443,10 @@ module name_service::name_service {
         domain_name: String,
     ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
-        assert!(
-            is_event_store_published(addr),
-            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
-        );
+        
+        if (!is_event_store_published(addr)) {
+            publish_event_store(account)
+        };
 
         let event_store = borrow_global_mut<Events>(addr);
 
@@ -490,10 +491,10 @@ module name_service::name_service {
         duration: u64,
     ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
-        assert!(
-            is_event_store_published(addr),
-            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
-        );
+
+        if (!is_event_store_published(addr)) {
+            publish_event_store(account)
+        };
 
         let event_store = borrow_global_mut<Events>(addr);
 
@@ -539,10 +540,10 @@ module name_service::name_service {
         record_values: vector<String>,
     ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
-        assert!(
-            is_event_store_published(addr),
-            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
-        );
+
+        if (!is_event_store_published(addr)) {
+            publish_event_store(account)
+        };
 
         let event_store = borrow_global_mut<Events>(addr);
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
@@ -572,10 +573,9 @@ module name_service::name_service {
         record_keys: vector<String>,
     ) acquires Events, ModuleStore {
         let addr = signer::address_of(account);
-        assert!(
-            is_event_store_published(addr),
-            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
-        );
+        if (!is_event_store_published(addr)) {
+            publish_event_store(account)
+        };
 
         let event_store = borrow_global_mut<Events>(addr);
         let module_store = borrow_global_mut<ModuleStore>(@name_service);
@@ -683,103 +683,189 @@ module name_service::name_service {
         timestamp > expiration_date
     }
 
-//     // TODO fix test (tip. create pool, provide liquidity)
-//     #[test(chain = @0x1, source = @name_service, user1 = @0x2, user2 = @0x3)]
-//     fun end_to_end(
-//         chain: signer,
-//         source: signer,
-//         user1: signer,
-//         user2: signer,
-//     ) acquires Events, ModuleStore {
-//         coin::initialize_for_chain<native_uinit::Coin>(
-//             &chain,
-//             std::string::utf8(b"name"),
-//             std::string::utf8(b"SYMBOL"),
-//             6
-//         );
+    #[test_only]
+    fun deploy_dex(chain: &signer) {
+        coin::init_module_for_test(chain);
+        coin::initialize_for_chain<initia_std::native_uusdc::Coin>(
+            chain,
+            string::utf8(b"usd coin"),
+            string::utf8(b"USDC"),
+            6
+        );
+        dex::initialize_for_chain<initia_std::native_uusdc::Coin>(
+            chain,
+            string::utf8(b"0.8"),
+            string::utf8(b"0.2"),
+            string::utf8(b"0.003"),
+        );
+        let chain_addr = signer::address_of(chain);
 
-//         let addr1 = signer::address_of(&user1);
-//         let addr2 = signer::address_of(&user2);
-//         coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr1, 100);
-//         coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr2, 100);
+        coin::register<initia_std::native_uusdc::Coin>(chain);
+        coin::mint_to_for_chain<initia_std::native_uusdc::Coin>(chain, chain_addr, 100000);
+        coin::mint_to_for_chain<initia_std::native_uinit::Coin>(chain, chain_addr, 40000);
+        // 1uinit == 10uusdc
+        dex::provide_liquidity_script<initia_std::native_uusdc::Coin>(
+            chain,
+            40000,
+            100000,
+            option::none(),
+        );
+    }
 
-//         initialize(
-//             &source,
-//             10,
-//             5,
-//             1,
-//             1209600,
-//             1209600,
-//             string::utf8(b"https://test.com/"),
-//         );
+    #[test(chain = @0x1, source = @name_service, user1 = @0x2, user2 = @0x3)]
+    fun end_to_end(
+        chain: signer,
+        source: signer,
+        user1: signer,
+        user2: signer,
+    ) acquires Events, ModuleStore {
+        coin::initialize_for_chain<native_uinit::Coin>(
+            &chain,
+            std::string::utf8(b"name"),
+            std::string::utf8(b"SYMBOL"),
+            6
+        );
 
-//         nft::register<Metadata>(&user1);
-//         nft::register<Metadata>(&user2);
+        deploy_dex(&chain);
 
-//         publish_event_store(&user1);
-//         publish_event_store(&user2);
+        let addr1 = signer::address_of(&user1);
+        let addr2 = signer::address_of(&user2);
+        coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr1, 100);
+        coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr2, 100);
 
-//         std::unit_test::set_block_info_for_testing(100, 100);
+        initialize(
+            &source,
+            100,
+            50,
+            10,
+            1209600,
+            1209600,
+            string::utf8(b"https://test.com/"),
+            string::utf8(b"https://test.com/"),
+        );
 
-//         register_domain(&user1, string::utf8(b"abc"), 31557600);
-//         assert!(coin::balance<native_uinit::Coin>(addr1) == 90, 0);
+        nft::register<Metadata>(&user1);
+        nft::register<Metadata>(&user2);
 
-//         register_domain(&user1, string::utf8(b"abcd"), 31557600);
-//         assert!(coin::balance<native_uinit::Coin>(addr1) == 85, 0);
+        publish_event_store(&user1);
+        publish_event_store(&user2);
 
-//         register_domain(&user1, string::utf8(b"abcde"), 31557600);
-//         assert!(coin::balance<native_uinit::Coin>(addr1) == 84, 0);
+        std::block::set_block_info(100, 100);
 
-//         register_domain(&user1, string::utf8(b"abcdefghijk"), 31557600);
-//         assert!(coin::balance<native_uinit::Coin>(addr1) == 83, 0);
+        register_domain(&user1, string::utf8(b"abc"), 31557600);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 90, 0);
 
-//         assert!(
-//             get_valid_token_id(string::utf8(b"abc")) 
-//                 == string::utf8(b"abc:100"),
-//             0,
-//         );
+        register_domain(&user1, string::utf8(b"abcd"), 31557600);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 85, 0);
 
-//         set_name(&user1, string::utf8(b"abcd"));
-//         assert!(get_name_from_address(addr1) == string::utf8(b"abcd"), 0);
-//         assert!(get_address_from_name(string::utf8(b"abcd")) == addr1, 0);
+        register_domain(&user1, string::utf8(b"abcde"), 31557600);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 84, 0);
 
-//         set_name(&user1, string::utf8(b"abc"));
-//         assert!(get_name_from_address(addr1) == string::utf8(b"abc"), 0);
-//         assert!(get_address_from_name(string::utf8(b"abc")) == addr1, 0);
+        register_domain(&user1, string::utf8(b"abcdefghijk"), 31557600);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 83, 0);
 
-//         extend_expiration(&user1, string::utf8(b"abcd"), 31557600);
-//         assert!(coin::balance<native_uinit::Coin>(addr1) == 78, 0);
+        assert!(
+            get_valid_token_id(string::utf8(b"abc")) 
+                == option::some(string::utf8(b"abc:100")),
+            0,
+        );
 
-//         std::unit_test::set_block_info_for_testing(200, 100 + 31557600 + 1209600 + 1);
-//         register_domain(&user2, string::utf8(b"abc"), 31557600);
+        set_name(&user1, string::utf8(b"abcd"));
+        assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abcd")), 0);
+        assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr1), 0);
 
-//         set_name(&user2, string::utf8(b"abc"));
-//         assert!(get_name_from_address(addr2) == string::utf8(b"abc"), 0);
-//         assert!(get_address_from_name(string::utf8(b"abc")) == addr2, 0);
+        set_name(&user1, string::utf8(b"abc"));
+        assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abc")), 0);
+        assert!(get_address_from_name(string::utf8(b"abc")) == option::some(addr1), 0);
 
-//         set_name(&user1, string::utf8(b"abcd"));
-//         assert!(get_name_from_address(addr1) == string::utf8(b"abcd"), 0);
-//         assert!(get_address_from_name(string::utf8(b"abcd")) == addr1, 0);
+        extend_expiration(&user1, string::utf8(b"abcd"), 31557600);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 78, 0);
 
-//         update_records(
-//             &user1,
-//             string::utf8(b"abcd"),
-//             vector[string::utf8(b"height"), string::utf8(b"weight")],
-//             vector[string::utf8(b"190cm"), string::utf8(b"80kg")]
-//         );
+        std::block::set_block_info(200, 100 + 31557600 + 1209600 + 1);
+        register_domain(&user2, string::utf8(b"abc"), 31557600);
 
-//         delete_records(
-//              &user1,
-//             string::utf8(b"abcd"),
-//             vector[string::utf8(b"weight")],
-//         )
-//     }
+        set_name(&user2, string::utf8(b"abc"));
+        assert!(get_name_from_address(addr2) == option::some(string::utf8(b"abc")), 0);
+        assert!(get_address_from_name(string::utf8(b"abc")) == option::some(addr2), 0);
 
-//     #[test]
-//     fun test_to_lower_case() {
-//         let name = string::utf8(b"AbCd");
-//         assert!(to_lower_case(&name) == string::utf8(b"abcd"), 0);
-//     }
+        set_name(&user1, string::utf8(b"abcd"));
+        assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abcd")), 0);
+        assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr1), 0);
+
+        update_records(
+            &user1,
+            string::utf8(b"abcd"),
+            vector[string::utf8(b"height"), string::utf8(b"weight")],
+            vector[string::utf8(b"190cm"), string::utf8(b"80kg")]
+        );
+
+        delete_records(
+             &user1,
+            string::utf8(b"abcd"),
+            vector[string::utf8(b"weight")],
+        )
+    }
+
+    #[test(chain = @0x1, source = @name_service, user = @0x2)]
+    fun query_test(
+        chain: signer,
+        source: signer,
+        user: signer
+    ) acquires Events, ModuleStore {
+        coin::initialize_for_chain<native_uinit::Coin>(
+            &chain,
+            std::string::utf8(b"name"),
+            std::string::utf8(b"SYMBOL"),
+            6
+        );
+
+        deploy_dex(&chain);
+
+        let addr = signer::address_of(&user);
+        coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr, 100);
+
+        initialize(
+            &source,
+            100,
+            50,
+            10,
+            1000,
+            1000,
+            string::utf8(b"https://test.com/"),
+            string::utf8(b"https://test.com/"),
+        );
+
+        std::block::set_block_info(100, 100);
+
+        // before register
+        assert!(get_name_from_address(addr) == option::none(), 0);
+        assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 1);
+        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::none(), 2);
+
+        register_domain(&user, string::utf8(b"abcd"), 1000);
+        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::some(string::utf8(b"abcd:100")), 3);
+        set_name(&user, string::utf8(b"abcd"));
+        assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 4);
+        assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 5);
+
+        // after expired
+        std::block::set_block_info(110, 1110);
+        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::some(string::utf8(b"abcd:100")), 6);
+        assert!(get_name_from_address(addr) == option::none(), 7);
+        assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 8);
+
+        // after extend
+        extend_expiration(&user, string::utf8(b"abcd"), 1000);
+        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::some(string::utf8(b"abcd:100")), 9);
+        assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 10);
+        assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 11);
+    }
+
+    #[test]
+    fun test_to_lower_case() {
+        let name = string::utf8(b"AbCd");
+        assert!(to_lower_case(&name) == string::utf8(b"abcd"), 0);
+    }
 }
 
 module initia_std::native_uusdc {
