@@ -1,4 +1,4 @@
-module name_service::name_service {
+module usernames::usernames {
     use std::error;
     use std::event::{Self, EventHandle};
     use std::string::{Self, String};
@@ -14,7 +14,7 @@ module name_service::name_service {
     use initia_std::option::{Self, Option};
     use initia_std::table::{Self, Table};
 
-    use name_service::metadata::{Self, Metadata};
+    use usernames::metadata::{Self, Metadata};
 
     /// Only chain can execute.
     const EUNAUTHORIZED: u64 = 0;
@@ -135,7 +135,7 @@ module name_service::name_service {
 
     #[view]
     public fun get_valid_token_id(domain_name: String): Option<String> acquires ModuleStore {
-        let module_store = borrow_global<ModuleStore>(@name_service);
+        let module_store = borrow_global<ModuleStore>(@usernames);
         let id = if (table::contains(&module_store.name_to_id, domain_name)) {
             option::some(*table::borrow(&module_store.name_to_id, domain_name))
         } else {
@@ -147,7 +147,7 @@ module name_service::name_service {
 
     #[view]
     public fun get_name_from_address(addr: address): Option<String> acquires ModuleStore {
-        let module_store = borrow_global<ModuleStore>(@name_service);
+        let module_store = borrow_global<ModuleStore>(@usernames);
         let name = if (table::contains(&module_store.addr_to_name, addr)) {
             let name = *table::borrow(&module_store.addr_to_name, addr);
             if (is_expired(name)) {
@@ -164,12 +164,12 @@ module name_service::name_service {
 
     #[view]
     public fun get_address_from_name(name: String): Option<address> acquires ModuleStore {
-        let module_store = borrow_global<ModuleStore>(@name_service);
+        let module_store = borrow_global<ModuleStore>(@usernames);
         let addr = if (table::contains(&module_store.name_to_addr, name)) {
             if (is_expired(name)) {
                 option::none()
             } else {
-                let module_store = borrow_global<ModuleStore>(@name_service);
+                let module_store = borrow_global<ModuleStore>(@usernames);
                 option::some(*table::borrow(&module_store.name_to_addr, name))
             }
         } else {
@@ -181,7 +181,7 @@ module name_service::name_service {
 
     #[view]
     public fun get_config(): ConfigResponse acquires ModuleStore {
-        let module_store = borrow_global<ModuleStore>(@name_service);
+        let module_store = borrow_global<ModuleStore>(@usernames);
 
         ConfigResponse {
             price_per_year_3char: module_store.config.price_per_year_3char,
@@ -198,9 +198,14 @@ module name_service::name_service {
         get_cost_amount(domain_name, duration)
     }
 
+    #[view]
+    public fun is_event_store_published(account_addr: address): bool {
+        exists<Events>(account_addr)
+    }
+
     /// return (price_per_year_3char, price_per_year_4char, price_per_year_default, min_duration, grace_period, base_uri)
     public fun get_config_params(): (u64, u64, u64, u64, u64, String) acquires ModuleStore {
-        let module_store = borrow_global<ModuleStore>(@name_service);
+        let module_store = borrow_global<ModuleStore>(@usernames);
 
         (
             module_store.config.price_per_year_3char,
@@ -210,10 +215,6 @@ module name_service::name_service {
             module_store.config.grace_period,
             module_store.config.base_uri,
         )
-    }
-
-    public entry fun is_event_store_published(account_addr: address): bool {
-        exists<Events>(account_addr)
     }
 
     /// Initialize, Make global store
@@ -227,13 +228,13 @@ module name_service::name_service {
         base_uri: String,
         collection_uri: String,
     ) {
-        assert!(signer::address_of(chain) == @name_service, error::invalid_argument(EUNAUTHORIZED));
-        assert!(!exists<ModuleStore>(@name_service), error::already_exists(EMODULE_STORE_ALREADY_PUBLISHED));
+        assert!(signer::address_of(chain) == @usernames, error::invalid_argument(EUNAUTHORIZED));
+        assert!(!exists<ModuleStore>(@usernames), error::already_exists(EMODULE_STORE_ALREADY_PUBLISHED));
 
         let mint_cap = nft::make_collection<Metadata>(
             chain,
-            string::utf8(b"Initia Name Service"),
-            string::utf8(b"INS"),
+            string::utf8(b"Initia Usernames"),
+            string::utf8(b"IU"),
             collection_uri,
             true,
         );
@@ -267,9 +268,9 @@ module name_service::name_service {
         grace_period: Option<u64>,
         base_uri: Option<String>,
     ) acquires ModuleStore {
-        assert!(signer::address_of(chain) == @name_service, error::invalid_argument(EUNAUTHORIZED));
+        assert!(signer::address_of(chain) == @usernames, error::invalid_argument(EUNAUTHORIZED));
 
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
 
         if (option::is_some(&price_per_year_3char)) {
             module_store.config.price_per_year_3char = option::extract(&mut price_per_year_3char);
@@ -334,7 +335,7 @@ module name_service::name_service {
         let event_store = borrow_global_mut<Events>(addr);
 
         // check expiration
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
 
         let (_height, timestamp) = block::get_block_info();
 
@@ -395,7 +396,7 @@ module name_service::name_service {
 
         let cost_amount = get_cost_amount(domain_name, duration);
 
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
 
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
 
@@ -423,7 +424,7 @@ module name_service::name_service {
 
         let event_store = borrow_global_mut<Events>(addr);
 
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
 
         if (table::contains(&module_store.addr_to_name, addr)) {
             let removed_name = table::remove(&mut module_store.addr_to_name, addr);
@@ -453,7 +454,7 @@ module name_service::name_service {
         let (_height, timestamp) = block::get_block_info();
         domain_name = to_lower_case(&domain_name);
 
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
 
@@ -498,7 +499,7 @@ module name_service::name_service {
 
         let event_store = borrow_global_mut<Events>(addr);
 
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         let nft_info = nft::get_nft_info<Metadata>(token_id);
@@ -518,7 +519,7 @@ module name_service::name_service {
 
         let cost_amount = get_cost_amount(domain_name, duration);
 
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
 
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
 
@@ -546,7 +547,7 @@ module name_service::name_service {
         };
 
         let event_store = borrow_global_mut<Events>(addr);
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
@@ -578,7 +579,7 @@ module name_service::name_service {
         };
 
         let event_store = borrow_global_mut<Events>(addr);
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
         let token_id = *table::borrow(&module_store.name_to_id, domain_name);
         assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
@@ -634,7 +635,7 @@ module name_service::name_service {
     }
 
     fun get_cost_amount(domain_name: String, duration: u64): u64 acquires ModuleStore {
-        let module_store = borrow_global_mut<ModuleStore>(@name_service);
+        let module_store = borrow_global_mut<ModuleStore>(@usernames);
         let len = string::length(&domain_name);
         let price_per_year = if (len == 3) {
             module_store.config.price_per_year_3char
@@ -644,7 +645,11 @@ module name_service::name_service {
             module_store.config.price_per_year_default
         };
 
-        let spot_price = dex::get_spot_price<initia_std::native_uusdc::Coin>();
+        let spot_price = dex::get_spot_price<
+            initia_std::native_uinit::Coin,
+            initia_std::native_uusdc::Coin,
+            lp_publisher::coins::LP<initia_std::native_uinit::Coin, initia_std::native_uusdc::Coin>
+        >();
 
         let usd_value = (decimal128::mul(
             &decimal128::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
@@ -684,54 +689,89 @@ module name_service::name_service {
     }
 
     #[test_only]
-    fun deploy_dex(chain: &signer) {
-        coin::init_module_for_test(chain);
-        coin::initialize_for_chain<initia_std::native_uusdc::Coin>(
-            chain,
-            string::utf8(b"usd coin"),
-            string::utf8(b"USDC"),
-            6
-        );
-        dex::initialize_for_chain<initia_std::native_uusdc::Coin>(
-            chain,
-            string::utf8(b"0.8"),
-            string::utf8(b"0.2"),
-            string::utf8(b"0.003"),
-        );
-        let chain_addr = signer::address_of(chain);
-
-        coin::register<initia_std::native_uusdc::Coin>(chain);
-        coin::mint_to_for_chain<initia_std::native_uusdc::Coin>(chain, chain_addr, 100000);
-        coin::mint_to_for_chain<initia_std::native_uinit::Coin>(chain, chain_addr, 40000);
-        // 1uinit == 10uusdc
-        dex::provide_liquidity_script<initia_std::native_uusdc::Coin>(
-            chain,
-            40000,
-            100000,
-            option::none(),
-        );
+    struct CoinCaps<phantom CoinType> has key {
+        burn_cap: coin::BurnCapability<CoinType>,
+        freeze_cap: coin::FreezeCapability<CoinType>,
+        mint_cap: coin::MintCapability<CoinType>,
     }
 
-    #[test(chain = @0x1, source = @name_service, user1 = @0x2, user2 = @0x3)]
+    #[test_only]
+    fun initialized_coin<CoinType>(
+        account: &signer
+    ): (coin::BurnCapability<CoinType>, coin::FreezeCapability<CoinType>, coin::MintCapability<CoinType>) {
+        coin::initialize<CoinType>(
+            account,
+            std::string::utf8(b"name"),
+            std::string::utf8(b"SYMBOL"),
+            6,
+        )
+    }
+
+    #[test_only]
+    fun deploy_dex(chain: &signer, lp_publisher: &signer) {
+        coin::init_module_for_test(chain);
+        dex::init_module_for_test(chain);
+        let (usdc_burn_cap, usdc_freeze_cap, usdc_mint_cap) = initialized_coin<initia_std::native_uusdc::Coin>(chain);
+        let (initia_burn_cap, initia_freeze_cap, initia_mint_cap) = initialized_coin<initia_std::native_uinit::Coin>(chain);
+        let lp_publisher_addr = signer::address_of(lp_publisher);
+
+        coin::register<initia_std::native_uusdc::Coin>(lp_publisher);
+        coin::register<initia_std::native_uinit::Coin>(lp_publisher);
+        coin::deposit<initia_std::native_uinit::Coin>(lp_publisher_addr, coin::mint(100000000, &initia_mint_cap));
+        coin::deposit<initia_std::native_uusdc::Coin>(lp_publisher_addr, coin::mint(100000000, &usdc_mint_cap));
+        
+        // 1uinit == 10uusdc
+        dex::create_pair_script<
+            initia_std::native_uinit::Coin,
+            initia_std::native_uusdc::Coin,
+            lp_publisher::coins::LP<initia_std::native_uinit::Coin, initia_std::native_uusdc::Coin>
+        >(
+            lp_publisher,
+            std::string::utf8(b"name"),
+            std::string::utf8(b"SYMBOL"),
+            std::string::utf8(b"0.8"),
+            std::string::utf8(b"0.2"),
+            std::string::utf8(b"0.003"),
+            40000,
+            100000,
+        );
+
+        move_to(chain, CoinCaps<initia_std::native_uinit::Coin> {
+            burn_cap: initia_burn_cap,
+            freeze_cap: initia_freeze_cap,
+            mint_cap: initia_mint_cap,
+        });
+
+        move_to(chain, CoinCaps<initia_std::native_uusdc::Coin> {
+            burn_cap: usdc_burn_cap,
+            freeze_cap: usdc_freeze_cap,
+            mint_cap: usdc_mint_cap,
+        });
+    }
+
+    #[test_only]
+    fun mint_to<Coin>(chain_addr: address, account: &signer, amount: u64) acquires CoinCaps {
+        let caps = borrow_global<CoinCaps<Coin>>(chain_addr);
+        if (!coin::is_account_registered<Coin>(signer::address_of(account))) {
+            coin::register<Coin>(account)
+        };
+        coin::deposit<Coin>(signer::address_of(account), coin::mint(amount, &caps.mint_cap));
+    }
+
+    #[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3, lp_publisher = @lp_publisher)]
     fun end_to_end(
         chain: signer,
         source: signer,
         user1: signer,
         user2: signer,
-    ) acquires Events, ModuleStore {
-        coin::initialize_for_chain<native_uinit::Coin>(
-            &chain,
-            std::string::utf8(b"name"),
-            std::string::utf8(b"SYMBOL"),
-            6
-        );
-
-        deploy_dex(&chain);
-
+        lp_publisher: signer,
+    ) acquires CoinCaps, Events, ModuleStore {
+        deploy_dex(&chain, &lp_publisher);
+        let chain_addr = signer::address_of(&chain);
         let addr1 = signer::address_of(&user1);
         let addr2 = signer::address_of(&user2);
-        coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr1, 100);
-        coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr2, 100);
+        mint_to<native_uinit::Coin>(chain_addr, &user1, 100);
+        mint_to<native_uinit::Coin>(chain_addr, &user2, 100);
 
         initialize(
             &source,
@@ -806,23 +846,17 @@ module name_service::name_service {
         )
     }
 
-    #[test(chain = @0x1, source = @name_service, user = @0x2)]
+    #[test(chain = @0x1, source = @usernames, user = @0x2, lp_publisher = @lp_publisher)]
     fun query_test(
         chain: signer,
         source: signer,
-        user: signer
-    ) acquires Events, ModuleStore {
-        coin::initialize_for_chain<native_uinit::Coin>(
-            &chain,
-            std::string::utf8(b"name"),
-            std::string::utf8(b"SYMBOL"),
-            6
-        );
-
-        deploy_dex(&chain);
+        user: signer,
+        lp_publisher: signer,
+    ) acquires CoinCaps, Events, ModuleStore {
+        deploy_dex(&chain, &lp_publisher);
 
         let addr = signer::address_of(&user);
-        coin::mint_to_for_chain<native_uinit::Coin>(&chain, addr, 100);
+        mint_to<native_uinit::Coin>(signer::address_of(&chain), &user, 100);
 
         initialize(
             &source,
@@ -870,4 +904,9 @@ module name_service::name_service {
 
 module initia_std::native_uusdc {
     struct Coin {}
+}
+
+// this must be modify
+module lp_publisher::coins {
+    struct LP<phantom CoinA, phantom CoinB> {}
 }

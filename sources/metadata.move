@@ -1,4 +1,4 @@
-module name_service::metadata {
+module usernames::metadata {
     use std::string::String;
     use std::vector;
     use std::error;
@@ -9,9 +9,9 @@ module name_service::metadata {
     const EMAX_RECORD_EXCEED: u64 = 1;
     const EKEY_NOT_FOUND: u64 = 2;
 
-    friend name_service::name_service;
+    friend usernames::usernames;
 
-    struct Metadata has drop, store, copy {
+    struct Metadata has copy, drop, store {
         expiration_date: u64,
         name: String,
         record_keys: vector<String>,

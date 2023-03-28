@@ -1,14 +1,16 @@
 [package]
-name = "NameService"
+name = "Usernames"
 version = "0.0.1"
 
 [addresses]
 std = "0x1"
 initia_std = "0x1"
-name_service = "_"
+usernames = "_"
+lp_publisher = "_"
 
 [dev-addresses]
-name_service = "0x2"
+usernames = "0x2"
+lp_publisher = "0x3"
 
 [dependencies]
 InitiaStdlib = { local = "../../backends/initiavm/crates/stdlib/src/initia_stdlib" }
