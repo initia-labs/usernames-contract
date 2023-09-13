@@ -11,39 +11,46 @@ module usernames::metadata {
 
     friend usernames::usernames;
 
-    struct Metadata has copy, drop, store {
+    struct Metadata has key {
         expiration_date: u64,
         name: String,
         record_keys: vector<String>,
         record_values: vector<String>,
     }
 
-    public(friend) fun new(
+    public(friend) fun create(
+        token: &signer,
         expiration_date: u64,
         name: String,
         record_keys: vector<String>,
         record_values: vector<String>,
-    ): Metadata {
-        Metadata {
-            expiration_date,
-            name,
-            record_keys,
-            record_values,
-        }
+    ) {
+        move_to(
+            token,
+            Metadata {
+                expiration_date,
+                name,
+                record_keys,
+                record_values,
+            },
+        )
+
     }
 
     public(friend) fun update_expiration_date(
-        metadata: &mut Metadata,
+        token: address,
         new_expiration_date: u64,
-    ) {
+    ) acquires Metadata {
+        let metadata = borrow_global_mut<Metadata>(token);
         metadata.expiration_date = new_expiration_date;
     }
 
     public(friend) fun update_records(
-        metadata: &mut Metadata,
+        token: address,
         record_keys: vector<String>,
         record_values: vector<String>,
-    ) {
+    ) acquires Metadata {
+        let metadata = borrow_global_mut<Metadata>(token);
         let key_length = vector::length(&record_keys);
         let value_length = vector::length(&record_values);
         assert!(key_length == value_length, error::invalid_argument(ELENGTH_MISMATCH));
@@ -64,9 +71,10 @@ module usernames::metadata {
     }
 
     public (friend) fun delete_records(
-        metadata: &mut Metadata,
+        token: address,
         record_keys: vector<String>,
-    ) {
+    ) acquires Metadata {
+        let metadata = borrow_global_mut<Metadata>(token);
         let length = vector::length(&record_keys);
         let index = 0;
         while(index < length) {
@@ -78,7 +86,8 @@ module usernames::metadata {
         };
     }
 
-    public fun get_expiration_date(metadata: &Metadata): u64 {
+    public fun get_expiration_date(token: address): u64 acquires Metadata {
+        let metadata = borrow_global<Metadata>(token);
         metadata.expiration_date
     }
 }

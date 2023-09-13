@@ -1,6 +1,6 @@
 module usernames::usernames {
     use std::error;
-    use std::event::{Self, EventHandle};
+    use std::event::Self;
     use std::string::{Self, String};
     use std::signer;
     use std::vector;
@@ -8,11 +8,13 @@ module usernames::usernames {
     use initia_std::block;    
     use initia_std::coin::{Self, Coin};
     use initia_std::decimal128;
+    use initia_std::collection;
     use initia_std::dex;
     use initia_std::native_uinit;
-    use initia_std::nft;
+    use initia_std::object::{Self, ExtendRef};
     use initia_std::option::{Self, Option};
     use initia_std::table::{Self, Table};
+    use initia_std::token::{Self, BurnRef};
 
     use usernames::metadata::{Self, Metadata};
 
@@ -60,57 +62,59 @@ module usernames::usernames {
 
     const TLD: vector<u8> =b".init";
 
-    const MAX_LENGTH: u64 = 1000;
+    const MAX_LENGTH: u64 = 64;
+    const FREE_LENGTH: u64 = 7;
 
     struct ModuleStore has key {
-        name_to_id: Table<String, String>,
+        name_to_token: Table<String, address>,
 
         name_to_addr: Table<String, address>,
 
         addr_to_name: Table<address, String>,
 
-        mint_cap: nft::Capability<Metadata>,
+        creator_extend_ref: ExtendRef,
 
         pool: Coin<native_uinit::Coin>,
 
         config: Config,
     }
 
-    struct Events has key {
-        register_events: EventHandle<RegisterEvent>,
-        unset_events: EventHandle<UnsetEvent>,
-        set_events: EventHandle<SetEvent>,
-        extend_events: EventHandle<ExtendEvent>,
-        update_records_events: EventHandle<UpdateRecordsEvent>,
-        delete_records_events: EventHandle<DeleteRecordsEvent>,
+    struct TokenBurnRef has key {
+        burn_ref: BurnRef,
     }
 
     struct RegisterEvent has drop, store {
+        addr: address,
         domain_name: String,
-        token_id: String,
+        token: address,
         expiration_date: u64,
     }
 
     struct UnsetEvent has drop, store {
+        addr: address,
         domain_name: String,
     }
 
     struct SetEvent has drop, store {
+        addr: address,
         domain_name: String,
     }
 
     struct ExtendEvent has drop, store {
+        addr: address,
         domain_name: String,
         expiration_date: u64,
     }
 
     struct UpdateRecordsEvent has drop, store {
+        addr: address,
         domain_name: String,
         keys: vector<String>,
         values: vector<String>,
     }
 
     struct DeleteRecordsEvent has drop, store {
+        addr: address,
         domain_name: String,
         keys: vector<String>,
     }
@@ -134,10 +138,10 @@ module usernames::usernames {
     }
 
     #[view]
-    public fun get_valid_token_id(domain_name: String): Option<String> acquires ModuleStore {
+    public fun get_valid_token(domain_name: String): Option<address> acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@usernames);
-        let id = if (table::contains(&module_store.name_to_id, domain_name)) {
-            option::some(*table::borrow(&module_store.name_to_id, domain_name))
+        let id = if (table::contains(&module_store.name_to_token, domain_name)) {
+            option::some(*table::borrow(&module_store.name_to_token, domain_name))
         } else {
             option::none()
         };
@@ -198,11 +202,6 @@ module usernames::usernames {
         get_cost_amount(domain_name, duration)
     }
 
-    #[view]
-    public fun is_event_store_published(account_addr: address): bool {
-        exists<Events>(account_addr)
-    }
-
     /// return (price_per_year_3char, price_per_year_4char, price_per_year_default, min_duration, grace_period, base_uri)
     public fun get_config_params(): (u64, u64, u64, u64, u64, String) acquires ModuleStore {
         let module_store = borrow_global<ModuleStore>(@usernames);
@@ -230,22 +229,25 @@ module usernames::usernames {
     ) {
         assert!(signer::address_of(chain) == @usernames, error::invalid_argument(EUNAUTHORIZED));
         assert!(!exists<ModuleStore>(@usernames), error::already_exists(EMODULE_STORE_ALREADY_PUBLISHED));
+        let constructor_ref = object::create_object(signer::address_of(chain));
+        let creator = object::generate_signer(&constructor_ref);
+        let creator_extend_ref = object::generate_extend_ref(&constructor_ref);
 
-        let mint_cap = nft::make_collection<Metadata>(
-            chain,
+        collection::create_unlimited_collection(
+            &creator,
             string::utf8(b"Initia Usernames"),
-            string::utf8(b"IU"),
+            string::utf8(b"Initia Usernames"),
+            option::none(),
             collection_uri,
-            true,
         );
 
         move_to(
             chain,
             ModuleStore {
-                name_to_id: table::new(),
+                name_to_token: table::new(),
                 name_to_addr: table::new(),
                 addr_to_name: table::new(),
-                mint_cap,
+                creator_extend_ref,
                 pool: coin::zero(),
                 config: Config {
                     price_per_year_3char,
@@ -297,55 +299,22 @@ module usernames::usernames {
         };
     }
 
-    public entry fun publish_event_store(
-        account: &signer,
-    ) {
-        let account_addr = signer::address_of(account);
-        assert!(
-            !is_event_store_published(account_addr),
-            error::already_exists(EEVENT_STORE_ALREADY_PUBLISHED),
-        );
-
-        let evnet_store = Events {
-            register_events: event::new_event_handle<RegisterEvent>(account),
-            unset_events: event::new_event_handle<UnsetEvent>(account),
-            set_events: event::new_event_handle<SetEvent>(account),
-            extend_events: event::new_event_handle<ExtendEvent>(account),
-            update_records_events: event::new_event_handle<UpdateRecordsEvent>(account),
-            delete_records_events: event::new_event_handle<DeleteRecordsEvent>(account),
-        };
-        move_to(account, evnet_store);
-    }
-
     public entry fun register_domain(
         account: &signer,
         domain_name: String,
         duration: u64,
-    ) acquires Events, ModuleStore {
+    ) acquires ModuleStore, TokenBurnRef {
         let addr = signer::address_of(account);
-
-        if (!is_event_store_published(addr)) {
-            publish_event_store(account)
-        };
-
-        if (!nft::is_account_registered<Metadata>(addr)) {
-            nft::register<Metadata>(account);
-        };
-
-        let event_store = borrow_global_mut<Events>(addr);
 
         // check expiration
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-
         let (_height, timestamp) = block::get_block_info();
 
         domain_name = to_lower_case(&domain_name);
 
-        if (table::contains(&module_store.name_to_id, domain_name)) {
-            let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-            let nft_info = nft::get_nft_info<Metadata>(token_id);
-            let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
-            let expiration_date = metadata::get_expiration_date(&extension);
+        if (table::contains(&module_store.name_to_token, domain_name)) {
+            let token = *table::borrow(&module_store.name_to_token, domain_name);
+            let expiration_date = metadata::get_expiration_date(token);
 
             assert!(
                 duration >= module_store.config.min_duration,
@@ -357,56 +326,51 @@ module usernames::usernames {
                 error::already_exists(EDOMAIN_NAME_ALREADY_EXISTS),
             );
 
-            table::remove(&mut module_store.name_to_id, domain_name);
-            
-            nft::update_nft(
-                token_id,
-                option::none(),
-                option::some(
-                    metadata::new(
-                        expiration_date,
-                        string::utf8(b"INVALID"),
-                        vector[],
-                        vector[],
-                    ),
-                ),
-                &module_store.mint_cap,
-            )
+            table::remove(&mut module_store.name_to_token, domain_name);
+            let TokenBurnRef { burn_ref } = move_from<TokenBurnRef>(token);
+            token::burn(burn_ref);
         };
 
         let name = domain_name;
         check_name(name);
         string::append_utf8(&mut name, TLD);
+        let creator = object::generate_signer_for_extending(&module_store.creator_extend_ref);
 
-        let extension = metadata::new(
+        let token_uri = module_store.config.base_uri;
+        string::append(&mut token_uri, domain_name);
+        let token_constructor_ref = token::create(
+            &creator,
+            string::utf8(b"Initia Usernames"),
+            string::utf8(b"Initia Usernames"),
+            name,
+            option::none(),
+            token_uri,
+        );
+        let token = object::generate_signer(&token_constructor_ref);
+        let token_addr = signer::address_of(&token);
+        object::transfer_raw(&creator, token_addr, addr);
+
+        let burn_ref = token::generate_burn_ref(&token_constructor_ref);
+        move_to(&token, TokenBurnRef { burn_ref });
+        table::add(&mut module_store.name_to_token, domain_name, token_addr);
+        metadata::create(
+            &token,
             timestamp + duration,
             name,
             vector[],
             vector[],
         );
 
-        let token_uri = module_store.config.base_uri;
-        string::append(&mut token_uri, domain_name);
-        let token_id = domain_name;
-        string::append(&mut token_id, string::utf8(b":"));
-        string::append(&mut token_id, u64_to_string(timestamp));
-        let nft = nft::mint(account, token_id, token_uri, extension, &module_store.mint_cap);
-        nft::deposit(addr, nft);
-        table::add(&mut module_store.name_to_id, domain_name, token_id);
-
         let cost_amount = get_cost_amount(domain_name, duration);
-
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
-
         coin::merge(&mut module_store.pool, cost);
 
-        event::emit_event<RegisterEvent>(
-            &mut event_store.register_events,
+        event::emit(
             RegisterEvent {
+                addr,
                 domain_name,
-                token_id,
+                token: token_addr,
                 expiration_date: timestamp + duration,
             },
         );
@@ -414,25 +378,17 @@ module usernames::usernames {
 
     public entry fun unset_name(
         account: &signer,
-    ) acquires Events, ModuleStore {
+    ) acquires ModuleStore {
         let addr = signer::address_of(account);
-        // impossible to not get event store
-        assert!(
-            is_event_store_published(addr),
-            error::not_found(EEVENT_STORE_NOT_PUBLISHED),
-        );
-
-        let event_store = borrow_global_mut<Events>(addr);
-
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
 
         if (table::contains(&module_store.addr_to_name, addr)) {
             let removed_name = table::remove(&mut module_store.addr_to_name, addr);
             table::remove(&mut module_store.name_to_addr, removed_name);
 
-            event::emit_event<UnsetEvent>(
-                &mut event_store.unset_events,
+            event::emit(
                 UnsetEvent {
+                    addr,
                     domain_name: removed_name,
                 },
             );
@@ -442,26 +398,18 @@ module usernames::usernames {
     public entry fun set_name(
         account: &signer,
         domain_name: String,
-    ) acquires Events, ModuleStore {
+    ) acquires  ModuleStore {
         let addr = signer::address_of(account);
-        
-        if (!is_event_store_published(addr)) {
-            publish_event_store(account)
-        };
-
-        let event_store = borrow_global_mut<Events>(addr);
-
         let (_height, timestamp) = block::get_block_info();
         domain_name = to_lower_case(&domain_name);
 
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-        assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
+        let token_addr = *table::borrow(&module_store.name_to_token, domain_name);
+        let token_object = object::address_to_object<Metadata>(token_addr);
+        assert!(object::is_owner(token_object, addr), error::permission_denied(ENOT_OWNER));
 
-        let nft_info = nft::get_nft_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
         assert!(
-            metadata::get_expiration_date(&extension) > timestamp,
+            metadata::get_expiration_date(token_addr) > timestamp,
             error::permission_denied(ETOKEN_EXPIRED),
         );
 
@@ -478,9 +426,9 @@ module usernames::usernames {
         table::add(&mut module_store.name_to_addr, domain_name, addr);
         table::add(&mut module_store.addr_to_name, addr, domain_name);
 
-        event::emit_event<SetEvent>(
-            &mut event_store.set_events,
+        event::emit(
             SetEvent {
+                addr,
                 domain_name,
             },
         );
@@ -490,44 +438,30 @@ module usernames::usernames {
         account: &signer,
         domain_name: String,
         duration: u64,
-    ) acquires Events, ModuleStore {
+    ) acquires ModuleStore {
         let addr = signer::address_of(account);
-
-        if (!is_event_store_published(addr)) {
-            publish_event_store(account)
-        };
-
-        let event_store = borrow_global_mut<Events>(addr);
 
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
-        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-        let nft_info = nft::get_nft_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
+        let token = *table::borrow(&module_store.name_to_token, domain_name);
 
         let (_height, timestamp) = block::get_block_info();
-        let expiration_date = metadata::get_expiration_date(&extension);
+        let expiration_date = metadata::get_expiration_date(token);
         let new_expiration_date = if (expiration_date > timestamp) {
             expiration_date + duration
         } else {
             timestamp + duration
         };
 
-        metadata::update_expiration_date(&mut extension, new_expiration_date);
-
-        nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
-
+        metadata::update_expiration_date(token, new_expiration_date);
         let cost_amount = get_cost_amount(domain_name, duration);
-
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-
         let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
-
         coin::merge(&mut module_store.pool, cost);
 
-        event::emit_event<ExtendEvent>(
-            &mut event_store.extend_events,
+        event::emit<ExtendEvent>(
             ExtendEvent {
+                addr,
                 domain_name,
                 expiration_date: new_expiration_date,
             },
@@ -539,28 +473,20 @@ module usernames::usernames {
         domain_name: String,
         record_keys: vector<String>,
         record_values: vector<String>,
-    ) acquires Events, ModuleStore {
+    ) acquires ModuleStore {
         let addr = signer::address_of(account);
 
-        if (!is_event_store_published(addr)) {
-            publish_event_store(account)
-        };
-
-        let event_store = borrow_global_mut<Events>(addr);
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
-        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-        assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
+        let token = *table::borrow(&module_store.name_to_token, domain_name);
+        let token_object = object::address_to_object<Metadata>(token);
+        assert!(object::is_owner(token_object, addr), error::permission_denied(ENOT_OWNER));
 
-        let nft_info = nft::get_nft_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
-        metadata::update_records(&mut extension, record_keys, record_values);
+        metadata::update_records(token, record_keys, record_values);
 
-        nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
-
-        event::emit_event<UpdateRecordsEvent>(
-            &mut event_store.update_records_events,
+        event::emit(
             UpdateRecordsEvent {
+                addr,
                 domain_name,
                 keys: record_keys,
                 values: record_values,
@@ -572,27 +498,20 @@ module usernames::usernames {
         account: &signer,
         domain_name: String,
         record_keys: vector<String>,
-    ) acquires Events, ModuleStore {
+    ) acquires ModuleStore {
         let addr = signer::address_of(account);
-        if (!is_event_store_published(addr)) {
-            publish_event_store(account)
-        };
 
-        let event_store = borrow_global_mut<Events>(addr);
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
-        let token_id = *table::borrow(&module_store.name_to_id, domain_name);
-        assert!(nft::contains<Metadata>(addr, token_id), error::permission_denied(ENOT_OWNER));
+        let token = *table::borrow(&module_store.name_to_token, domain_name);
+        let token_object = object::address_to_object<Metadata>(token);
+        assert!(object::is_owner(token_object, addr), error::permission_denied(ENOT_OWNER));
 
-        let nft_info = nft::get_nft_info<Metadata>(token_id);
-        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
+        metadata::delete_records(token, record_keys);
 
-        metadata::delete_records(&mut extension, record_keys);
-
-        nft::update_nft<Metadata>(token_id, option::none(), option::some(extension), &module_store.mint_cap);
-        event::emit_event<DeleteRecordsEvent>(
-            &mut event_store.delete_records_events,
+        event::emit(
             DeleteRecordsEvent {
+                addr,
                 domain_name,
                 keys: record_keys,
             },
@@ -607,6 +526,9 @@ module usernames::usernames {
         let index = 0;
         while (index < len) {
             let char = *vector::borrow(bytes, index);
+            if (index == 0 || index == len - 1) {
+                assert!(char != 45, error::invalid_argument(EINVALID_CHARACTOR))
+            };
             assert!(
                 char == 45 || // -
                 (char >= 48 && char <= 57) || // 0 ~ 9
@@ -641,19 +563,21 @@ module usernames::usernames {
             module_store.config.price_per_year_3char
         } else if (len == 4) {
             module_store.config.price_per_year_4char
-        } else {
+        } else if (len < FREE_LENGTH) {
             module_store.config.price_per_year_default
+        } else {
+            0
         };
 
         let spot_price = dex::get_spot_price<
             initia_std::native_uinit::Coin,
             initia_std::native_uusdc::Coin,
-            lp_publisher::coins::LP<initia_std::native_uinit::Coin, initia_std::native_uusdc::Coin>
+            lp_publisher::coins::LP<initia_std::native_uusdc::Coin, initia_std::native_uinit::Coin>
         >();
 
-        let usd_value = (decimal128::mul(
+        let usd_value = (decimal128::mul_u64(
             &decimal128::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
-            (price_per_year as u128),
+            price_per_year,
         ) as u64);
 
         let decimal128_price = decimal128::from_ratio(
@@ -661,7 +585,7 @@ module usernames::usernames {
             decimal128::val(&spot_price),
         );
 
-        (decimal128::mul(&decimal128_price, decimal128::val(&decimal128::one())) as u64)
+        (decimal128::mul_u128(&decimal128_price, decimal128::val(&decimal128::one())) as u64)
     }
 
     fun to_lower_case(str: &String): String {
@@ -680,10 +604,8 @@ module usernames::usernames {
     }
 
     fun is_expired(name: String): bool acquires ModuleStore {
-        let token_id = get_valid_token_id(name);
-        let nft_info = nft::get_nft_info<Metadata>(option::extract(&mut token_id));
-        let extension = nft::get_extension_from_nft_info_response<Metadata>(&nft_info);
-        let expiration_date = metadata::get_expiration_date(&extension);
+        let token = *option::borrow(&get_valid_token(name));
+        let expiration_date = metadata::get_expiration_date(token);
         let (_height, timestamp) = block::get_block_info();
         timestamp > expiration_date
     }
@@ -724,7 +646,7 @@ module usernames::usernames {
         dex::create_pair_script<
             initia_std::native_uinit::Coin,
             initia_std::native_uusdc::Coin,
-            lp_publisher::coins::LP<initia_std::native_uinit::Coin, initia_std::native_uusdc::Coin>
+            lp_publisher::coins::LP<initia_std::native_uusdc::Coin, initia_std::native_uinit::Coin>
         >(
             lp_publisher,
             std::string::utf8(b"name"),
@@ -765,7 +687,7 @@ module usernames::usernames {
         user1: signer,
         user2: signer,
         lp_publisher: signer,
-    ) acquires CoinCaps, Events, ModuleStore {
+    ) acquires CoinCaps, ModuleStore, TokenBurnRef {
         deploy_dex(&chain, &lp_publisher);
         let chain_addr = signer::address_of(&chain);
         let addr1 = signer::address_of(&user1);
@@ -784,11 +706,6 @@ module usernames::usernames {
             string::utf8(b"https://test.com/"),
         );
 
-        nft::register<Metadata>(&user1);
-        nft::register<Metadata>(&user2);
-
-        publish_event_store(&user1);
-        publish_event_store(&user2);
 
         std::block::set_block_info(100, 100);
 
@@ -802,13 +719,11 @@ module usernames::usernames {
         assert!(coin::balance<native_uinit::Coin>(addr1) == 84, 0);
 
         register_domain(&user1, string::utf8(b"abcdefghijk"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 83, 0);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 84, 0);
 
-        assert!(
-            get_valid_token_id(string::utf8(b"abc")) 
-                == option::some(string::utf8(b"abc:100")),
-            0,
-        );
+        let token = *option::borrow(&get_valid_token(string::utf8(b"abc")));
+        let token_object = object::address_to_object<Metadata>(token);
+        assert!(token::name(token_object) == string::utf8(b"abc.init"), 0);
 
         set_name(&user1, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abcd")), 0);
@@ -819,7 +734,7 @@ module usernames::usernames {
         assert!(get_address_from_name(string::utf8(b"abc")) == option::some(addr1), 0);
 
         extend_expiration(&user1, string::utf8(b"abcd"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 78, 0);
+        assert!(coin::balance<native_uinit::Coin>(addr1) == 79, 0);
 
         std::block::set_block_info(200, 100 + 31557600 + 1209600 + 1);
         register_domain(&user2, string::utf8(b"abc"), 31557600);
@@ -852,7 +767,7 @@ module usernames::usernames {
         source: signer,
         user: signer,
         lp_publisher: signer,
-    ) acquires CoinCaps, Events, ModuleStore {
+    ) acquires CoinCaps, ModuleStore, TokenBurnRef {
         deploy_dex(&chain, &lp_publisher);
 
         let addr = signer::address_of(&user);
@@ -874,23 +789,29 @@ module usernames::usernames {
         // before register
         assert!(get_name_from_address(addr) == option::none(), 0);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 1);
-        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::none(), 2);
+        assert!(get_valid_token(string::utf8(b"abcd")) == option::none(), 2);
 
         register_domain(&user, string::utf8(b"abcd"), 1000);
-        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::some(string::utf8(b"abcd:100")), 3);
+        let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
+        let token_object = object::address_to_object<Metadata>(token);
+        assert!(token::name(token_object) == string::utf8(b"abcd.init"), 3);
         set_name(&user, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 4);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 5);
 
         // after expired
         std::block::set_block_info(110, 1110);
-        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::some(string::utf8(b"abcd:100")), 6);
+        let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
+        let token_object = object::address_to_object<Metadata>(token);
+        assert!(token::name(token_object) == string::utf8(b"abcd.init"), 6);
         assert!(get_name_from_address(addr) == option::none(), 7);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 8);
 
         // after extend
         extend_expiration(&user, string::utf8(b"abcd"), 1000);
-        assert!(get_valid_token_id(string::utf8(b"abcd")) == option::some(string::utf8(b"abcd:100")), 9);
+        let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
+        let token_object = object::address_to_object<Metadata>(token);
+        assert!(token::name(token_object) == string::utf8(b"abcd.init"), 9);
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 10);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 11);
     }
