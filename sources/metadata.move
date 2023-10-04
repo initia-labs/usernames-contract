@@ -18,6 +18,24 @@ module usernames::metadata {
         record_values: vector<String>,
     }
 
+    struct MetadataResponse has drop {
+        expiration_date: u64,
+        name: String,
+        record_keys: vector<String>,
+        record_values: vector<String>,
+    }
+
+    #[view]
+    public fun get_metadata(addr: address): MetadataResponse acquires Metadata {
+        let metadata = borrow_global<Metadata>(addr);
+        MetadataResponse {
+            expiration_date: metadata.expiration_date,
+            name: metadata.name,
+            record_keys: metadata.record_keys,
+            record_values: metadata.record_values,
+        }
+    }
+
     public(friend) fun create(
         token: &signer,
         expiration_date: u64,

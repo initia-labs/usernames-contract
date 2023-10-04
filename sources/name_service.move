@@ -6,15 +6,16 @@ module usernames::usernames {
     use std::vector;
 
     use initia_std::block;    
-    use initia_std::coin::{Self, Coin};
+    use initia_std::coin;
     use initia_std::decimal128;
     use initia_std::collection;
-    use initia_std::dex;
-    use initia_std::native_uinit;
-    use initia_std::object::{Self, ExtendRef};
+    use initia_std::dex::{Self, Config as PairConfig};
+    use initia_std::object::{Self, ExtendRef, Object};
     use initia_std::option::{Self, Option};
     use initia_std::table::{Self, Table};
-    use initia_std::token::{Self, BurnRef};
+    use initia_std::nft::{Self, BurnRef};
+    use initia_std::primary_fungible_store;
+    use initia_std::fungible_asset::{Metadata as CoinMetadata};
 
     use usernames::metadata::{Self, Metadata};
 
@@ -60,7 +61,7 @@ module usernames::usernames {
     /// constants
     const YEAR_TO_SECOND: u64 = 31557600; // 365.25 * 24 * 60 * 60
 
-    const TLD: vector<u8> =b".init";
+    const TLD: vector<u8> = b".init";
 
     const MAX_LENGTH: u64 = 64;
     const FREE_LENGTH: u64 = 7;
@@ -74,7 +75,7 @@ module usernames::usernames {
 
         creator_extend_ref: ExtendRef,
 
-        pool: Coin<native_uinit::Coin>,
+        pool: address,
 
         config: Config,
     }
@@ -241,6 +242,9 @@ module usernames::usernames {
             collection_uri,
         );
 
+        let constructor_ref = object::create_object(@initia_std);
+        let pool = object::address_from_constructor_ref(&constructor_ref);
+
         move_to(
             chain,
             ModuleStore {
@@ -248,7 +252,7 @@ module usernames::usernames {
                 name_to_addr: table::new(),
                 addr_to_name: table::new(),
                 creator_extend_ref,
-                pool: coin::zero(),
+                pool,
                 config: Config {
                     price_per_year_3char,
                     price_per_year_4char,
@@ -328,7 +332,7 @@ module usernames::usernames {
 
             table::remove(&mut module_store.name_to_token, domain_name);
             let TokenBurnRef { burn_ref } = move_from<TokenBurnRef>(token);
-            token::burn(burn_ref);
+            nft::burn(burn_ref);
         };
 
         let name = domain_name;
@@ -338,7 +342,7 @@ module usernames::usernames {
 
         let token_uri = module_store.config.base_uri;
         string::append(&mut token_uri, domain_name);
-        let token_constructor_ref = token::create(
+        let token_constructor_ref = nft::create(
             &creator,
             string::utf8(b"Initia Usernames"),
             string::utf8(b"Initia Usernames"),
@@ -350,7 +354,7 @@ module usernames::usernames {
         let token_addr = signer::address_of(&token);
         object::transfer_raw(&creator, token_addr, addr);
 
-        let burn_ref = token::generate_burn_ref(&token_constructor_ref);
+        let burn_ref = nft::generate_burn_ref(&token_constructor_ref);
         move_to(&token, TokenBurnRef { burn_ref });
         table::add(&mut module_store.name_to_token, domain_name, token_addr);
         metadata::create(
@@ -363,8 +367,8 @@ module usernames::usernames {
 
         let cost_amount = get_cost_amount(domain_name, duration);
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-        let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
-        coin::merge(&mut module_store.pool, cost);
+        let cost = primary_fungible_store::withdraw(account, get_init_metadata(), (cost_amount as u64));
+        primary_fungible_store::deposit(module_store.pool, cost);
 
         event::emit(
             RegisterEvent {
@@ -456,8 +460,8 @@ module usernames::usernames {
         metadata::update_expiration_date(token, new_expiration_date);
         let cost_amount = get_cost_amount(domain_name, duration);
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-        let cost = coin::withdraw<native_uinit::Coin>(account, (cost_amount as u64));
-        coin::merge(&mut module_store.pool, cost);
+        let cost = primary_fungible_store::withdraw(account, get_init_metadata(), (cost_amount as u64));
+        primary_fungible_store::deposit(module_store.pool, cost);
 
         event::emit<ExtendEvent>(
             ExtendEvent {
@@ -569,11 +573,7 @@ module usernames::usernames {
             0
         };
 
-        let spot_price = dex::get_spot_price<
-            initia_std::native_uinit::Coin,
-            initia_std::native_uusdc::Coin,
-            lp_publisher::coins::LP<initia_std::native_uusdc::Coin, initia_std::native_uinit::Coin>
-        >();
+        let spot_price = dex::get_spot_price(get_init_metadata(), object::address_to_object<PairConfig>(@pair));
 
         let usd_value = (decimal128::mul_u64(
             &decimal128::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
@@ -610,61 +610,74 @@ module usernames::usernames {
         timestamp > expiration_date
     }
 
-    #[test_only]
-    struct CoinCaps<phantom CoinType> has key {
-        burn_cap: coin::BurnCapability<CoinType>,
-        freeze_cap: coin::FreezeCapability<CoinType>,
-        mint_cap: coin::MintCapability<CoinType>,
+    fun get_init_metadata(): Object<CoinMetadata> {
+        let init_symbol = string::utf8(b"uinit");
+        coin::metadata(@initia_std, init_symbol)
     }
 
     #[test_only]
-    fun initialized_coin<CoinType>(
-        account: &signer
-    ): (coin::BurnCapability<CoinType>, coin::FreezeCapability<CoinType>, coin::MintCapability<CoinType>) {
-        coin::initialize<CoinType>(
+    struct CoinCapsInit has key {
+        burn_cap: coin::BurnCapability,
+        freeze_cap: coin::FreezeCapability,
+        mint_cap: coin::MintCapability,
+    }
+
+    #[test_only]
+    struct CoinCapsUsdc has key {
+        burn_cap: coin::BurnCapability,
+        freeze_cap: coin::FreezeCapability,
+        mint_cap: coin::MintCapability,
+    }
+
+    #[test_only]
+    fun initialized_coin(
+        account: &signer,
+        symbol: String,
+    ): (coin::MintCapability, coin::BurnCapability, coin::FreezeCapability) {
+        coin::initialize(
             account,
+            option::none(),
             std::string::utf8(b"name"),
-            std::string::utf8(b"SYMBOL"),
+            symbol,
             6,
+            string::utf8(b""),
+            string::utf8(b""),
         )
     }
 
     #[test_only]
     fun deploy_dex(chain: &signer, lp_publisher: &signer) {
-        coin::init_module_for_test(chain);
+        primary_fungible_store::init_module_for_test(chain);
         dex::init_module_for_test(chain);
-        let (usdc_burn_cap, usdc_freeze_cap, usdc_mint_cap) = initialized_coin<initia_std::native_uusdc::Coin>(chain);
-        let (initia_burn_cap, initia_freeze_cap, initia_mint_cap) = initialized_coin<initia_std::native_uinit::Coin>(chain);
+        let (usdc_mint_cap, usdc_burn_cap, usdc_freeze_cap) = initialized_coin(chain, string::utf8(b"USDC"));
+        let (initia_mint_cap, initia_burn_cap, initia_freeze_cap) = initialized_coin(chain, string::utf8(b"uinit"));
         let lp_publisher_addr = signer::address_of(lp_publisher);
+        let chain_addr = signer::address_of(chain);
 
-        coin::register<initia_std::native_uusdc::Coin>(lp_publisher);
-        coin::register<initia_std::native_uinit::Coin>(lp_publisher);
-        coin::deposit<initia_std::native_uinit::Coin>(lp_publisher_addr, coin::mint(100000000, &initia_mint_cap));
-        coin::deposit<initia_std::native_uusdc::Coin>(lp_publisher_addr, coin::mint(100000000, &usdc_mint_cap));
+        primary_fungible_store::deposit(lp_publisher_addr, coin::mint(&initia_mint_cap, 100000000));
+        primary_fungible_store::deposit(lp_publisher_addr, coin::mint(&usdc_mint_cap, 100000000));
         
         // 1uinit == 10uusdc
-        dex::create_pair_script<
-            initia_std::native_uinit::Coin,
-            initia_std::native_uusdc::Coin,
-            lp_publisher::coins::LP<initia_std::native_uusdc::Coin, initia_std::native_uinit::Coin>
-        >(
+        dex::create_pair_script(
             lp_publisher,
             std::string::utf8(b"name"),
             std::string::utf8(b"SYMBOL"),
-            std::string::utf8(b"0.8"),
-            std::string::utf8(b"0.2"),
-            std::string::utf8(b"0.003"),
+            decimal128::from_ratio(3, 1000),
+            decimal128::from_ratio(8, 10),
+            decimal128::from_ratio(2, 10),
+            coin::metadata(chain_addr, string::utf8(b"uinit")),
+            coin::metadata(chain_addr, string::utf8(b"USDC")),
             40000,
             100000,
         );
 
-        move_to(chain, CoinCaps<initia_std::native_uinit::Coin> {
+        move_to(chain, CoinCapsInit {
             burn_cap: initia_burn_cap,
             freeze_cap: initia_freeze_cap,
             mint_cap: initia_mint_cap,
         });
 
-        move_to(chain, CoinCaps<initia_std::native_uusdc::Coin> {
+        move_to(chain, CoinCapsUsdc {
             burn_cap: usdc_burn_cap,
             freeze_cap: usdc_freeze_cap,
             mint_cap: usdc_mint_cap,
@@ -672,12 +685,15 @@ module usernames::usernames {
     }
 
     #[test_only]
-    fun mint_to<Coin>(chain_addr: address, account: &signer, amount: u64) acquires CoinCaps {
-        let caps = borrow_global<CoinCaps<Coin>>(chain_addr);
-        if (!coin::is_account_registered<Coin>(signer::address_of(account))) {
-            coin::register<Coin>(account)
-        };
-        coin::deposit<Coin>(signer::address_of(account), coin::mint(amount, &caps.mint_cap));
+    fun init_mint_to(chain_addr: address, account: &signer, amount: u64) acquires CoinCapsInit {
+        let caps = borrow_global<CoinCapsInit>(chain_addr);
+        primary_fungible_store::deposit(signer::address_of(account), coin::mint(&caps.mint_cap, amount));
+    }
+
+    #[test_only]
+    fun usdc_mint_to(chain_addr: address, account: &signer, amount: u64) acquires CoinCapsInit {
+        let caps = borrow_global<CoinCapsInit>(chain_addr);
+        primary_fungible_store::deposit(signer::address_of(account), coin::mint(&caps.mint_cap, amount));
     }
 
     #[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3, lp_publisher = @lp_publisher)]
@@ -687,13 +703,13 @@ module usernames::usernames {
         user1: signer,
         user2: signer,
         lp_publisher: signer,
-    ) acquires CoinCaps, ModuleStore, TokenBurnRef {
+    ) acquires CoinCapsInit, ModuleStore, TokenBurnRef {
         deploy_dex(&chain, &lp_publisher);
         let chain_addr = signer::address_of(&chain);
         let addr1 = signer::address_of(&user1);
         let addr2 = signer::address_of(&user2);
-        mint_to<native_uinit::Coin>(chain_addr, &user1, 100);
-        mint_to<native_uinit::Coin>(chain_addr, &user2, 100);
+        init_mint_to(chain_addr, &user1, 100);
+        init_mint_to(chain_addr, &user2, 100);
 
         initialize(
             &source,
@@ -710,20 +726,20 @@ module usernames::usernames {
         std::block::set_block_info(100, 100);
 
         register_domain(&user1, string::utf8(b"abc"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 90, 0);
+        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 90, 0);
 
         register_domain(&user1, string::utf8(b"abcd"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 85, 0);
+        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 85, 0);
 
         register_domain(&user1, string::utf8(b"abcde"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 84, 0);
+        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 84, 0);
 
         register_domain(&user1, string::utf8(b"abcdefghijk"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 84, 0);
+        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 84, 0);
 
         let token = *option::borrow(&get_valid_token(string::utf8(b"abc")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(token::name(token_object) == string::utf8(b"abc.init"), 0);
+        assert!(nft::name(token_object) == string::utf8(b"abc.init"), 0);
 
         set_name(&user1, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abcd")), 0);
@@ -734,7 +750,7 @@ module usernames::usernames {
         assert!(get_address_from_name(string::utf8(b"abc")) == option::some(addr1), 0);
 
         extend_expiration(&user1, string::utf8(b"abcd"), 31557600);
-        assert!(coin::balance<native_uinit::Coin>(addr1) == 79, 0);
+        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 79, 0);
 
         std::block::set_block_info(200, 100 + 31557600 + 1209600 + 1);
         register_domain(&user2, string::utf8(b"abc"), 31557600);
@@ -767,11 +783,11 @@ module usernames::usernames {
         source: signer,
         user: signer,
         lp_publisher: signer,
-    ) acquires CoinCaps, ModuleStore, TokenBurnRef {
+    ) acquires CoinCapsInit, ModuleStore, TokenBurnRef {
         deploy_dex(&chain, &lp_publisher);
 
         let addr = signer::address_of(&user);
-        mint_to<native_uinit::Coin>(signer::address_of(&chain), &user, 100);
+        init_mint_to(signer::address_of(&chain), &user, 100);
 
         initialize(
             &source,
@@ -794,7 +810,7 @@ module usernames::usernames {
         register_domain(&user, string::utf8(b"abcd"), 1000);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(token::name(token_object) == string::utf8(b"abcd.init"), 3);
+        assert!(nft::name(token_object) == string::utf8(b"abcd.init"), 3);
         set_name(&user, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 4);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 5);
@@ -803,7 +819,7 @@ module usernames::usernames {
         std::block::set_block_info(110, 1110);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(token::name(token_object) == string::utf8(b"abcd.init"), 6);
+        assert!(nft::name(token_object) == string::utf8(b"abcd.init"), 6);
         assert!(get_name_from_address(addr) == option::none(), 7);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 8);
 
@@ -811,7 +827,7 @@ module usernames::usernames {
         extend_expiration(&user, string::utf8(b"abcd"), 1000);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(token::name(token_object) == string::utf8(b"abcd.init"), 9);
+        assert!(nft::name(token_object) == string::utf8(b"abcd.init"), 9);
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 10);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 11);
     }
@@ -821,13 +837,4 @@ module usernames::usernames {
         let name = string::utf8(b"AbCd");
         assert!(to_lower_case(&name) == string::utf8(b"abcd"), 0);
     }
-}
-
-module initia_std::native_uusdc {
-    struct Coin {}
-}
-
-// this must be modify
-module lp_publisher::coins {
-    struct LP<phantom CoinA, phantom CoinB> {}
 }

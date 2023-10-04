@@ -6,10 +6,12 @@ version = "0.0.1"
 std = "0x1"
 initia_std = "0x1"
 usernames = "_"
+pair = "_"
 lp_publisher = "_"
 
 [dev-addresses]
 usernames = "0x2"
+pair = "0x892d79399f244a7fe7273c27ece2b5c36024131565fcd331fc3dc9c480add001"
 lp_publisher = "0x3"
 
 [dependencies]
