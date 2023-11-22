@@ -3,6 +3,9 @@ module usernames::metadata {
     use std::vector;
     use std::error;
 
+    use initia_std::object;
+    use initia_std::nft::{Self, Nft};
+
     const MAX_RECORD: u64 = 10;
 
     const ELENGTH_MISMATCH: u64 = 0;
@@ -16,6 +19,12 @@ module usernames::metadata {
         name: String,
         record_keys: vector<String>,
         record_values: vector<String>,
+    }
+
+    struct TokenInfoResponse {
+        token_id: address,
+        token_uri: String,
+        extension: MetadataResponse,
     }
 
     struct MetadataResponse has drop {
@@ -33,6 +42,21 @@ module usernames::metadata {
             name: metadata.name,
             record_keys: metadata.record_keys,
             record_values: metadata.record_values,
+        }
+    }
+
+    #[view]
+    public fun get_token_info(addr: address): TokenInfoResponse acquires Metadata {
+        let metadata = borrow_global<Metadata>(addr);
+        TokenInfoResponse {
+            token_id: addr,
+            token_uri: nft::uri(object::address_to_object<Nft>(addr)),
+            extension: MetadataResponse {
+                expiration_date: metadata.expiration_date,
+                name: metadata.name,
+                record_keys: metadata.record_keys,
+                record_values: metadata.record_values,
+            }
         }
     }
 

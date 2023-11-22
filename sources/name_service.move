@@ -316,14 +316,14 @@ module usernames::usernames {
 
         domain_name = to_lower_case(&domain_name);
 
+        assert!(
+            duration >= module_store.config.min_duration,
+            error::invalid_argument(EMIN_DURATION),
+        );
+
         if (table::contains(&module_store.name_to_token, domain_name)) {
             let token = *table::borrow(&module_store.name_to_token, domain_name);
             let expiration_date = metadata::get_expiration_date(token);
-
-            assert!(
-                duration >= module_store.config.min_duration,
-                error::invalid_argument(EMIN_DURATION),
-            );
 
             assert!(
                 expiration_date + module_store.config.grace_period < timestamp,
@@ -338,6 +338,8 @@ module usernames::usernames {
         let name = domain_name;
         check_name(name);
         string::append_utf8(&mut name, TLD);
+        string::append_utf8(&mut name, b":");
+        string::append(&mut name, u64_to_string(timestamp));
         let creator = object::generate_signer_for_extending(&module_store.creator_extend_ref);
 
         let token_uri = module_store.config.base_uri;
@@ -573,7 +575,7 @@ module usernames::usernames {
             0
         };
 
-        let spot_price = dex::get_spot_price(get_init_metadata(), object::address_to_object<PairConfig>(@pair));
+        let spot_price = dex::get_spot_price(object::address_to_object<PairConfig>(@pair), get_init_metadata());
 
         let usd_value = (decimal128::mul_u64(
             &decimal128::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
@@ -739,7 +741,7 @@ module usernames::usernames {
 
         let token = *option::borrow(&get_valid_token(string::utf8(b"abc")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::name(token_object) == string::utf8(b"abc.init"), 0);
+        assert!(nft::token_id(token_object) == string::utf8(b"abc.init:100"), 0);
 
         set_name(&user1, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abcd")), 0);
@@ -810,7 +812,7 @@ module usernames::usernames {
         register_domain(&user, string::utf8(b"abcd"), 1000);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::name(token_object) == string::utf8(b"abcd.init"), 3);
+        assert!(nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 3);
         set_name(&user, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 4);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 5);
@@ -819,7 +821,7 @@ module usernames::usernames {
         std::block::set_block_info(110, 1110);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::name(token_object) == string::utf8(b"abcd.init"), 6);
+        assert!(nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 6);
         assert!(get_name_from_address(addr) == option::none(), 7);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 8);
 
@@ -827,7 +829,7 @@ module usernames::usernames {
         extend_expiration(&user, string::utf8(b"abcd"), 1000);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::name(token_object) == string::utf8(b"abcd.init"), 9);
+        assert!(nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 9);
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 10);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 11);
     }
