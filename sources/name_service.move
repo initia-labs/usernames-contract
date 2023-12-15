@@ -219,7 +219,7 @@ module usernames::usernames {
 
     /// Initialize, Make global store
     public entry fun initialize(
-        chain: &signer,
+        account: &signer,
         price_per_year_3char: u64,
         price_per_year_4char: u64,
         price_per_year_default: u64,
@@ -228,9 +228,9 @@ module usernames::usernames {
         base_uri: String,
         collection_uri: String,
     ) {
-        assert!(signer::address_of(chain) == @usernames, error::invalid_argument(EUNAUTHORIZED));
+        assert!(signer::address_of(account) == @usernames, error::invalid_argument(EUNAUTHORIZED));
         assert!(!exists<ModuleStore>(@usernames), error::already_exists(EMODULE_STORE_ALREADY_PUBLISHED));
-        let constructor_ref = object::create_object(signer::address_of(chain));
+        let constructor_ref = object::create_object(signer::address_of(account), false);
         let creator = object::generate_signer(&constructor_ref);
         let creator_extend_ref = object::generate_extend_ref(&constructor_ref);
 
@@ -242,11 +242,11 @@ module usernames::usernames {
             collection_uri,
         );
 
-        let constructor_ref = object::create_object(@initia_std);
+        let constructor_ref = object::create_object(@initia_std, false);
         let pool = object::address_from_constructor_ref(&constructor_ref);
 
         move_to(
-            chain,
+            account,
             ModuleStore {
                 name_to_token: table::new(),
                 name_to_addr: table::new(),
