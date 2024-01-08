@@ -8,12 +8,12 @@ module usernames::usernames {
     use initia_std::block;    
     use initia_std::coin;
     use initia_std::decimal128;
-    use initia_std::collection;
     use initia_std::dex::{Self, Config as PairConfig};
     use initia_std::object::{Self, ExtendRef, Object};
     use initia_std::option::{Self, Option};
     use initia_std::table::{Self, Table};
-    use initia_std::nft::{Self, BurnRef};
+    use initia_std::nft::Nft;
+    use initia_std::initia_nft;
     use initia_std::primary_fungible_store;
     use initia_std::fungible_asset::{Metadata as CoinMetadata};
 
@@ -78,10 +78,6 @@ module usernames::usernames {
         pool: address,
 
         config: Config,
-    }
-
-    struct TokenBurnRef has key {
-        burn_ref: BurnRef,
     }
 
     struct RegisterEvent has drop, store {
@@ -234,12 +230,18 @@ module usernames::usernames {
         let creator = object::generate_signer(&constructor_ref);
         let creator_extend_ref = object::generate_extend_ref(&constructor_ref);
 
-        collection::create_unlimited_collection(
+        initia_nft::create_collection_object(
             &creator,
             string::utf8(b"Initia Usernames"),
-            string::utf8(b"Initia Usernames"),
             option::none(),
+            string::utf8(b"Initia Usernames"),
             collection_uri,
+            false,
+            false,
+            false,
+            true,
+            true,
+            decimal128::zero(),
         );
 
         let constructor_ref = object::create_object(@initia_std, false);
@@ -307,7 +309,7 @@ module usernames::usernames {
         account: &signer,
         domain_name: String,
         duration: u64,
-    ) acquires ModuleStore, TokenBurnRef {
+    ) acquires ModuleStore {
         let addr = signer::address_of(account);
 
         // check expiration
@@ -321,6 +323,8 @@ module usernames::usernames {
             error::invalid_argument(EMIN_DURATION),
         );
 
+        let creator = &object::generate_signer_for_extending(&module_store.creator_extend_ref);
+
         if (table::contains(&module_store.name_to_token, domain_name)) {
             let token = *table::borrow(&module_store.name_to_token, domain_name);
             let expiration_date = metadata::get_expiration_date(token);
@@ -331,8 +335,9 @@ module usernames::usernames {
             );
 
             table::remove(&mut module_store.name_to_token, domain_name);
-            let TokenBurnRef { burn_ref } = move_from<TokenBurnRef>(token);
-            nft::burn(burn_ref);
+            let token_uri = module_store.config.base_uri;
+            string::append(&mut token_uri, string::utf8(b"expired"));
+            initia_nft::set_uri(creator, object::address_to_object<Nft>(token), token_uri);
         };
 
         let name = domain_name;
@@ -340,24 +345,21 @@ module usernames::usernames {
         string::append_utf8(&mut name, TLD);
         string::append_utf8(&mut name, b":");
         string::append(&mut name, u64_to_string(timestamp));
-        let creator = object::generate_signer_for_extending(&module_store.creator_extend_ref);
 
         let token_uri = module_store.config.base_uri;
         string::append(&mut token_uri, domain_name);
-        let token_constructor_ref = nft::create(
-            &creator,
+        let (_, extend_ref) = initia_nft::mint_nft_object(
+            creator,
             string::utf8(b"Initia Usernames"),
             string::utf8(b"Initia Usernames"),
             name,
-            option::none(),
             token_uri,
+            false,
         );
-        let token = object::generate_signer(&token_constructor_ref);
-        let token_addr = signer::address_of(&token);
-        object::transfer_raw(&creator, token_addr, addr);
+        let token = object::generate_signer_for_extending(&extend_ref);
+        let token_addr = object::address_from_extend_ref(&extend_ref);
+        object::transfer_raw(creator, token_addr, addr);
 
-        let burn_ref = nft::generate_burn_ref(&token_constructor_ref);
-        move_to(&token, TokenBurnRef { burn_ref });
         table::add(&mut module_store.name_to_token, domain_name, token_addr);
         metadata::create(
             &token,
@@ -698,14 +700,14 @@ module usernames::usernames {
         primary_fungible_store::deposit(signer::address_of(account), coin::mint(&caps.mint_cap, amount));
     }
 
-    #[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3, lp_publisher = @lp_publisher)]
+    #[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3, lp_publisher = @0x3)]
     fun end_to_end(
         chain: signer,
         source: signer,
         user1: signer,
         user2: signer,
         lp_publisher: signer,
-    ) acquires CoinCapsInit, ModuleStore, TokenBurnRef {
+    ) acquires CoinCapsInit, ModuleStore {
         deploy_dex(&chain, &lp_publisher);
         let chain_addr = signer::address_of(&chain);
         let addr1 = signer::address_of(&user1);
@@ -741,7 +743,7 @@ module usernames::usernames {
 
         let token = *option::borrow(&get_valid_token(string::utf8(b"abc")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::token_id(token_object) == string::utf8(b"abc.init:100"), 0);
+        assert!(initia_std::nft::token_id(token_object) == string::utf8(b"abc.init:100"), 0);
 
         set_name(&user1, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr1) == option::some(string::utf8(b"abcd")), 0);
@@ -779,13 +781,13 @@ module usernames::usernames {
         )
     }
 
-    #[test(chain = @0x1, source = @usernames, user = @0x2, lp_publisher = @lp_publisher)]
+    #[test(chain = @0x1, source = @usernames, user = @0x2, lp_publisher = @0x3)]
     fun query_test(
         chain: signer,
         source: signer,
         user: signer,
         lp_publisher: signer,
-    ) acquires CoinCapsInit, ModuleStore, TokenBurnRef {
+    ) acquires CoinCapsInit, ModuleStore {
         deploy_dex(&chain, &lp_publisher);
 
         let addr = signer::address_of(&user);
@@ -812,7 +814,7 @@ module usernames::usernames {
         register_domain(&user, string::utf8(b"abcd"), 1000);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 3);
+        assert!(initia_std::nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 3);
         set_name(&user, string::utf8(b"abcd"));
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 4);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 5);
@@ -821,7 +823,7 @@ module usernames::usernames {
         std::block::set_block_info(110, 1110);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 6);
+        assert!(initia_std::nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 6);
         assert!(get_name_from_address(addr) == option::none(), 7);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::none(), 8);
 
@@ -829,7 +831,7 @@ module usernames::usernames {
         extend_expiration(&user, string::utf8(b"abcd"), 1000);
         let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
         let token_object = object::address_to_object<Metadata>(token);
-        assert!(nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 9);
+        assert!(initia_std::nft::token_id(token_object) == string::utf8(b"abcd.init:100"), 9);
         assert!(get_name_from_address(addr) == option::some(string::utf8(b"abcd")), 10);
         assert!(get_address_from_name(string::utf8(b"abcd")) == option::some(addr), 11);
     }
