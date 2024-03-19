@@ -80,6 +80,7 @@ module usernames::usernames {
         config: Config,
     }
 
+    #[event]
     struct RegisterEvent has drop, store {
         addr: address,
         domain_name: String,
@@ -87,22 +88,26 @@ module usernames::usernames {
         expiration_date: u64,
     }
 
+    #[event]
     struct UnsetEvent has drop, store {
         addr: address,
         domain_name: String,
     }
 
+    #[event]
     struct SetEvent has drop, store {
         addr: address,
         domain_name: String,
     }
 
+    #[event]
     struct ExtendEvent has drop, store {
         addr: address,
         domain_name: String,
         expiration_date: u64,
     }
 
+    #[event]
     struct UpdateRecordsEvent has drop, store {
         addr: address,
         domain_name: String,
@@ -110,6 +115,7 @@ module usernames::usernames {
         values: vector<String>,
     }
 
+    #[event]
     struct DeleteRecordsEvent has drop, store {
         addr: address,
         domain_name: String,
@@ -226,7 +232,7 @@ module usernames::usernames {
     ) {
         assert!(signer::address_of(account) == @usernames, error::invalid_argument(EUNAUTHORIZED));
         assert!(!exists<ModuleStore>(@usernames), error::already_exists(EMODULE_STORE_ALREADY_PUBLISHED));
-        let constructor_ref = object::create_object(signer::address_of(account), false);
+        let constructor_ref = object::create_named_object(account, b"usernames", false);
         let creator = object::generate_signer(&constructor_ref);
         let creator_extend_ref = object::generate_extend_ref(&constructor_ref);
 

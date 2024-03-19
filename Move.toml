@@ -5,8 +5,8 @@ version = "0.0.1"
 [addresses]
 std = "0x1"
 initia_std = "0x1"
-usernames = "_"
-pair = "_"
+usernames = "0x62B7900F8B12F95BDD46C755B2E938493436CA0D"
+pair = "0xdbf06c48af3984ec6d9ae8a9aa7dbb0bb1e784aa9b8c4a5681af660cf8558d7d"
 
 [dev-addresses]
 usernames = "0x2"
