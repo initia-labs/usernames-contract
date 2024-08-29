@@ -61,6 +61,8 @@ module usernames::usernames {
     /// constants
     const YEAR_TO_SECOND: u64 = 31557600; // 365.25 * 24 * 60 * 60
 
+    const MAX_EXPIRATION: u64 = 3155760000; // 100 years
+
     const TLD: vector<u8> = b".init";
 
     const MAX_LENGTH: u64 = 64;
@@ -232,7 +234,7 @@ module usernames::usernames {
     ) {
         assert!(signer::address_of(account) == @usernames, error::invalid_argument(EUNAUTHORIZED));
         assert!(!exists<ModuleStore>(@usernames), error::already_exists(EMODULE_STORE_ALREADY_PUBLISHED));
-        let constructor_ref = object::create_named_object(account, b"usernames", false);
+        let constructor_ref = object::create_named_object(account, b"usernames");
         let creator = object::generate_signer(&constructor_ref);
         let creator_extend_ref = object::generate_extend_ref(&constructor_ref);
 
@@ -326,6 +328,11 @@ module usernames::usernames {
 
         assert!(
             duration >= module_store.config.min_duration,
+            error::invalid_argument(EMIN_DURATION),
+        );
+
+        assert!(
+            duration <= MAX_EXPIRATION,
             error::invalid_argument(EMIN_DURATION),
         );
 
@@ -459,6 +466,11 @@ module usernames::usernames {
         domain_name = to_lower_case(&domain_name);
         let token = *table::borrow(&module_store.name_to_token, domain_name);
 
+        assert!(
+            duration >= module_store.config.min_duration,
+            error::invalid_argument(EMIN_DURATION),
+        );
+
         let (_height, timestamp) = block::get_block_info();
         let expiration_date = metadata::get_expiration_date(token);
         let new_expiration_date = if (expiration_date > timestamp) {
@@ -466,6 +478,11 @@ module usernames::usernames {
         } else {
             timestamp + duration
         };
+
+        assert!(
+            new_expiration_date - expiration_date <= MAX_EXPIRATION,
+            error::invalid_argument(EMIN_DURATION),
+        );
 
         metadata::update_expiration_date(token, new_expiration_date);
         let cost_amount = get_cost_amount(domain_name, duration);
