@@ -7,7 +7,7 @@ module usernames::usernames {
 
     use initia_std::block;    
     use initia_std::coin;
-    use initia_std::decimal128;
+    use initia_std::bigdecimal;
     use initia_std::dex::{Self, Config as PairConfig};
     use initia_std::object::{Self, ExtendRef, Object};
     use initia_std::option::{Self, Option};
@@ -249,7 +249,7 @@ module usernames::usernames {
             false,
             true,
             true,
-            decimal128::zero(),
+            bigdecimal::zero(),
         );
 
         let constructor_ref = object::create_object(@initia_std, false);
@@ -602,17 +602,14 @@ module usernames::usernames {
 
         let spot_price = dex::get_spot_price(object::address_to_object<PairConfig>(@pair), get_init_metadata());
 
-        let usd_value = (decimal128::mul_u64(
-            &decimal128::from_ratio((duration as u128), (YEAR_TO_SECOND as u128)),
-            price_per_year,
-        ) as u64);
+        let usd_value = bigdecimal::from_ratio_u128((price_per_year as u128) * (duration as u128), (YEAR_TO_SECOND as u128));
 
-        let decimal128_price = decimal128::from_ratio(
-            (usd_value as u128),
-            decimal128::val(&spot_price),
+        let bigdecimal_price = bigdecimal::div(
+            usd_value,
+            spot_price,
         );
 
-        (decimal128::mul_u128(&decimal128_price, decimal128::val(&decimal128::one())) as u64)
+        bigdecimal::truncate_u64(bigdecimal_price)
     }
 
     fun to_lower_case(str: &String): String {
@@ -674,8 +671,8 @@ module usernames::usernames {
 
     #[test_only]
     fun deploy_dex(chain: &signer, lp_publisher: &signer) {
-        primary_fungible_store::init_module_for_test(chain);
-        dex::init_module_for_test(chain);
+        primary_fungible_store::init_module_for_test();
+        dex::init_module_for_test();
         let (usdc_mint_cap, usdc_burn_cap, usdc_freeze_cap) = initialized_coin(chain, string::utf8(b"USDC"));
         let (initia_mint_cap, initia_burn_cap, initia_freeze_cap) = initialized_coin(chain, string::utf8(b"uinit"));
         let lp_publisher_addr = signer::address_of(lp_publisher);
@@ -689,9 +686,9 @@ module usernames::usernames {
             lp_publisher,
             std::string::utf8(b"name"),
             std::string::utf8(b"SYMBOL"),
-            decimal128::from_ratio(3, 1000),
-            decimal128::from_ratio(8, 10),
-            decimal128::from_ratio(2, 10),
+            bigdecimal::from_ratio_u64(3, 1000),
+            bigdecimal::from_ratio_u64(8, 10),
+            bigdecimal::from_ratio_u64(2, 10),
             coin::metadata(chain_addr, string::utf8(b"uinit")),
             coin::metadata(chain_addr, string::utf8(b"USDC")),
             40000,
