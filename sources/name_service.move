@@ -347,10 +347,17 @@ module usernames::usernames {
                 error::already_exists(EDOMAIN_NAME_ALREADY_EXISTS),
             );
 
+            // remove name_to_token
             table::remove(&mut module_store.name_to_token, domain_name);
             let token_uri = module_store.config.base_uri;
             string::append(&mut token_uri, string::utf8(b"expired"));
             initia_nft::set_uri(creator, object::address_to_object<Nft>(token), token_uri);
+
+            // remove record
+            if (table::contains(&module_store.name_to_addr, domain_name)) {
+                let former_addr = table::remove(&mut module_store.name_to_addr, domain_name);
+                table::remove(&mut module_store.addr_to_name, former_addr);
+            }
         };
 
         let name = domain_name;
@@ -776,8 +783,13 @@ module usernames::usernames {
         extend_expiration(&user1, string::utf8(b"abcd"), 31557600);
         assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 79, 0);
 
+        // expired
         std::block::set_block_info(200, 100 + 31557600 + 1209600 + 1);
         register_domain(&user2, string::utf8(b"abc"), 31557600);
+
+        // check record removed
+        assert!(get_name_from_address(addr1) == option::none(), 0);
+        assert!(get_address_from_name(string::utf8(b"abc")) == option::none(), 0);
 
         set_name(&user2, string::utf8(b"abc"));
         assert!(get_name_from_address(addr2) == option::some(string::utf8(b"abc")), 0);
