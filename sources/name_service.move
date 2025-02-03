@@ -66,7 +66,6 @@ module usernames::usernames {
     const TLD: vector<u8> = b".init";
 
     const MAX_LENGTH: u64 = 64;
-    const FREE_LENGTH: u64 = 7;
 
     struct ModuleStore has key {
         name_to_token: Table<String, address>,
@@ -601,10 +600,8 @@ module usernames::usernames {
             module_store.config.price_per_year_3char
         } else if (len == 4) {
             module_store.config.price_per_year_4char
-        } else if (len < FREE_LENGTH) {
-            module_store.config.price_per_year_default
         } else {
-            0
+            module_store.config.price_per_year_default
         };
 
         let spot_price = dex::get_spot_price(object::address_to_object<PairConfig>(@pair), get_init_metadata());
@@ -763,9 +760,6 @@ module usernames::usernames {
         assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 85, 0);
 
         register_domain(&user1, string::utf8(b"abcde"), 31557600);
-        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 84, 0);
-
-        register_domain(&user1, string::utf8(b"abcdefghijk"), 31557600);
         assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 84, 0);
 
         let token = *option::borrow(&get_valid_token(string::utf8(b"abc")));
