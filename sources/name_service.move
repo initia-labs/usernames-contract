@@ -25,6 +25,9 @@ module usernames::usernames {
     /// module store already exist.
     const EMODULE_STORE_ALREADY_PUBLISHED: u64 = 1;
 
+    /// expiration must be smaller than current timestamp + MAX_EXPIRATION
+    const EMAX_EXPIRATION: u64 = 3;
+
     /// duration must be bigger than min_duration
     const EMIN_DURATION: u64 = 3;
 
@@ -34,7 +37,7 @@ module usernames::usernames {
     /// name length must be more bigger than or equal to 3
     const EMIN_NAME_LENGTH: u64 = 5;
 
-    /// name length must be more bigger than or equal to 3
+    /// name length must be smaller than max length
     const EMAX_NAME_LENGTH: u64 = 6;
 
     /// invalid charactor
@@ -46,22 +49,10 @@ module usernames::usernames {
     /// token is expired
     const ETOKEN_EXPIRED: u64 = 9;
 
-    /// token id not found
-    const ETOKEN_ID_NOT_FOUND: u64 = 10;
-
-    /// name not found
-    const ENAME_NOT_FOUND: u64 = 11;
-
-    ///  address not found
-    const EADDRESS_NOT_FOUND: u64 = 12;
-
-    const EEVENT_STORE_ALREADY_PUBLISHED: u64 = 13;
-    const EEVENT_STORE_NOT_PUBLISHED: u64 = 14;
-
     /// constants
     const YEAR_TO_SECOND: u64 = 31557600; // 365.25 * 24 * 60 * 60
 
-    const MAX_EXPIRATION: u64 = 3155760000; // 100 years
+    const MAX_EXPIRATION: u64 = 315576000; // 10 years
 
     const TLD: vector<u8> = b".init";
 
@@ -254,6 +245,8 @@ module usernames::usernames {
         let constructor_ref = object::create_object(@initia_std, false);
         let pool = object::address_from_constructor_ref(&constructor_ref);
 
+        assert!(min_duration < MAX_EXPIRATION, error::invalid_argument(EMIN_DURATION));
+
         move_to(
             account,
             ModuleStore {
@@ -300,7 +293,9 @@ module usernames::usernames {
         };
 
         if (option::is_some(&min_duration)) {
-            module_store.config.min_duration = option::extract(&mut min_duration);
+            let min_duration = option::extract(&mut min_duration);
+            assert!(min_duration < MAX_EXPIRATION, error::invalid_argument(EMIN_DURATION));
+            module_store.config.min_duration = min_duration;
         };
 
         if (option::is_some(&grace_period)) {
@@ -332,7 +327,7 @@ module usernames::usernames {
 
         assert!(
             duration <= MAX_EXPIRATION,
-            error::invalid_argument(EMIN_DURATION),
+            error::invalid_argument(EMAX_EXPIRATION),
         );
 
         let creator = &object::generate_signer_for_extending(&module_store.creator_extend_ref);
@@ -486,8 +481,8 @@ module usernames::usernames {
         };
 
         assert!(
-            new_expiration_date - expiration_date <= MAX_EXPIRATION,
-            error::invalid_argument(EMIN_DURATION),
+            new_expiration_date - timestamp <= MAX_EXPIRATION,
+            error::invalid_argument(EMAX_EXPIRATION),
         );
 
         metadata::update_expiration_date(token, new_expiration_date);
@@ -559,7 +554,7 @@ module usernames::usernames {
         let bytes = string::bytes(&name);
         let len = vector::length(bytes);
         assert!(len >= 3, error::invalid_argument(EMIN_NAME_LENGTH));
-        assert!(len <= MAX_LENGTH, error::invalid_argument(EMIN_NAME_LENGTH));
+        assert!(len <= MAX_LENGTH, error::invalid_argument(EMAX_NAME_LENGTH));
         let index = 0;
         while (index < len) {
             let char = *vector::borrow(bytes, index);
