@@ -474,6 +474,10 @@ module usernames::usernames {
 
         let (_height, timestamp) = block::get_block_info();
         let expiration_date = metadata::get_expiration_date(token);
+
+        // Not allow extend for expired one. Reregister indstead. 
+        assert!(expiration_date + module_store.config.grace_period >= timestamp, error::invalid_state(ETOKEN_EXPIRED));
+
         let new_expiration_date = if (expiration_date > timestamp) {
             expiration_date + duration
         } else {
