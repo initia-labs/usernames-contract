@@ -8,7 +8,6 @@ module usernames::usernames {
     use initia_std::block;    
     use initia_std::coin;
     use initia_std::bigdecimal;
-    use initia_std::dex::{Self, Config as PairConfig};
     use initia_std::object::{Self, ExtendRef, Object};
     use initia_std::option::{Self, Option};
     use initia_std::table::{Self, Table};
@@ -67,7 +66,7 @@ module usernames::usernames {
 
         creator_extend_ref: ExtendRef,
 
-        pool: address,
+        pool: address, // DEPRECATED
 
         config: Config,
     }
@@ -603,7 +602,8 @@ module usernames::usernames {
             module_store.config.price_per_year_default
         };
 
-        let spot_price = dex::get_spot_price(object::address_to_object<PairConfig>(@pair), get_init_metadata());
+        // will update this to slinky oracle price after INIT/USD list
+        let spot_price = bigdecimal::one(); //dex::get_spot_price(object::address_to_object<PairConfig>(@pair), get_init_metadata());
 
         let usd_value = bigdecimal::from_ratio_u128((price_per_year as u128) * (duration as u128), (YEAR_TO_SECOND as u128));
 
@@ -643,14 +643,7 @@ module usernames::usernames {
     }
 
     #[test_only]
-    struct CoinCapsInit has key {
-        burn_cap: coin::BurnCapability,
-        freeze_cap: coin::FreezeCapability,
-        mint_cap: coin::MintCapability,
-    }
-
-    #[test_only]
-    struct CoinCapsUsdc has key {
+    struct CoinCaps has key {
         burn_cap: coin::BurnCapability,
         freeze_cap: coin::FreezeCapability,
         mint_cap: coin::MintCapability,
@@ -673,65 +666,31 @@ module usernames::usernames {
     }
 
     #[test_only]
-    fun deploy_dex(chain: &signer, lp_publisher: &signer) {
+    fun test_setup(chain: &signer) {
         primary_fungible_store::init_module_for_test();
-        dex::init_module_for_test();
-        let (usdc_mint_cap, usdc_burn_cap, usdc_freeze_cap) = initialized_coin(chain, string::utf8(b"USDC"));
         let (initia_mint_cap, initia_burn_cap, initia_freeze_cap) = initialized_coin(chain, string::utf8(b"uinit"));
-        let lp_publisher_addr = signer::address_of(lp_publisher);
-        let chain_addr = signer::address_of(chain);
 
-        primary_fungible_store::deposit(lp_publisher_addr, coin::mint(&initia_mint_cap, 100000000));
-        primary_fungible_store::deposit(lp_publisher_addr, coin::mint(&usdc_mint_cap, 100000000));
-
-        // 1uinit == 10uusdc
-        dex::create_pair_script(
-            lp_publisher,
-            std::string::utf8(b"name"),
-            std::string::utf8(b"SYMBOL"),
-            bigdecimal::from_ratio_u64(3, 1000),
-            bigdecimal::from_ratio_u64(8, 10),
-            bigdecimal::from_ratio_u64(2, 10),
-            coin::metadata(chain_addr, string::utf8(b"uinit")),
-            coin::metadata(chain_addr, string::utf8(b"USDC")),
-            40000,
-            100000,
-        );
-
-        move_to(chain, CoinCapsInit {
+        move_to(chain, CoinCaps {
             burn_cap: initia_burn_cap,
             freeze_cap: initia_freeze_cap,
             mint_cap: initia_mint_cap,
         });
-
-        move_to(chain, CoinCapsUsdc {
-            burn_cap: usdc_burn_cap,
-            freeze_cap: usdc_freeze_cap,
-            mint_cap: usdc_mint_cap,
-        });
     }
 
     #[test_only]
-    fun init_mint_to(chain_addr: address, account: &signer, amount: u64) acquires CoinCapsInit {
-        let caps = borrow_global<CoinCapsInit>(chain_addr);
+    fun init_mint_to(chain_addr: address, account: &signer, amount: u64) acquires CoinCaps {
+        let caps = borrow_global<CoinCaps>(chain_addr);
         primary_fungible_store::deposit(signer::address_of(account), coin::mint(&caps.mint_cap, amount));
     }
 
-    #[test_only]
-    fun usdc_mint_to(chain_addr: address, account: &signer, amount: u64) acquires CoinCapsInit {
-        let caps = borrow_global<CoinCapsInit>(chain_addr);
-        primary_fungible_store::deposit(signer::address_of(account), coin::mint(&caps.mint_cap, amount));
-    }
-
-    #[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3, lp_publisher = @0x3)]
+    #[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3)]
     fun end_to_end(
         chain: signer,
         source: signer,
         user1: signer,
         user2: signer,
-        lp_publisher: signer,
-    ) acquires CoinCapsInit, ModuleStore {
-        deploy_dex(&chain, &lp_publisher);
+    ) acquires CoinCaps, ModuleStore {
+        test_setup(&chain);
         let chain_addr = signer::address_of(&chain);
         let addr1 = signer::address_of(&user1);
         let addr2 = signer::address_of(&user2);
@@ -740,9 +699,9 @@ module usernames::usernames {
 
         initialize(
             &source,
-            100,
-            50,
             10,
+            5,
+            1,
             1209600,
             1209600,
             string::utf8(b"https://test.com/"),
@@ -806,23 +765,21 @@ module usernames::usernames {
         )
     }
 
-    #[test(chain = @0x1, source = @usernames, user = @0x2, lp_publisher = @0x3)]
+    #[test(chain = @0x1, source = @usernames, user = @0x2)]
     fun query_test(
         chain: signer,
         source: signer,
         user: signer,
-        lp_publisher: signer,
-    ) acquires CoinCapsInit, ModuleStore {
-        deploy_dex(&chain, &lp_publisher);
-
+    ) acquires CoinCaps, ModuleStore {
+        test_setup(&chain);
         let addr = signer::address_of(&user);
         init_mint_to(signer::address_of(&chain), &user, 100);
 
         initialize(
             &source,
-            100,
-            50,
             10,
+            5,
+            1,
             1000,
             1000,
             string::utf8(b"https://test.com/"),
