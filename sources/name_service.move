@@ -384,7 +384,7 @@ module usernames::usernames {
 
         let cost_amount = get_cost_amount(domain_name, duration);
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
-        let cost = primary_fungible_store::withdraw(account, get_init_metadata(), (cost_amount as u64));
+        let cost = primary_fungible_store::withdraw(account, get_init_metadata(), cost_amount);
         primary_fungible_store::deposit(module_store.pool, cost);
 
         event::emit(
@@ -567,7 +567,6 @@ module usernames::usernames {
             assert!(
                 char == 45 || // -
                 (char >= 48 && char <= 57) || // 0 ~ 9
-                (char >= 65 && char <= 90) || // A ~ Z
                 (char >= 97 && char <= 122), // a ~ z
                 error::invalid_argument(EINVALID_CHARACTER),
             );
