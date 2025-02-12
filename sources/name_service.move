@@ -546,12 +546,19 @@ module usernames::usernames {
 
         let module_store = borrow_global_mut<ModuleStore>(@usernames);
         domain_name = to_lower_case(&domain_name);
+
         let token = *table::borrow(&module_store.name_to_token, domain_name);
         let token_object = object::address_to_object<Metadata>(token);
+
+        let (_height, timestamp) = block::get_block_info();
+        assert!(
+            metadata::get_expiration_date(token) > timestamp,
+            error::permission_denied(ETOKEN_EXPIRED),
+        )
+        ;
         assert!(object::is_owner(token_object, addr), error::permission_denied(ENOT_OWNER));
 
         metadata::delete_records(token, record_keys);
-
         event::emit(
             DeleteRecordsEvent {
                 addr,
