@@ -40,8 +40,8 @@ module usernames::usernames {
     /// name length must be smaller than max length
     const EMAX_NAME_LENGTH: u64 = 6;
 
-    /// invalid charactor
-    const EINVALID_CHARACTOR: u64 = 7;
+    /// invalid character
+    const EINVALID_CHARACTER: u64 = 7;
 
     /// not an owner of the token
     const ENOT_OWNER: u64 = 8;
@@ -563,14 +563,14 @@ module usernames::usernames {
         while (index < len) {
             let char = *vector::borrow(bytes, index);
             if (index == 0 || index == len - 1) {
-                assert!(char != 45, error::invalid_argument(EINVALID_CHARACTOR))
+                assert!(char != 45, error::invalid_argument(EINVALID_CHARACTER))
             };
             assert!(
                 char == 45 || // -
                 (char >= 48 && char <= 57) || // 0 ~ 9
                 (char >= 65 && char <= 90) || // A ~ Z
                 (char >= 97 && char <= 122), // a ~ z
-                error::invalid_argument(EINVALID_CHARACTOR),
+                error::invalid_argument(EINVALID_CHARACTER),
             );
 
             index = index + 1;
