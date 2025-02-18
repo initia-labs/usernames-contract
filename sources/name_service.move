@@ -590,7 +590,10 @@ module usernames::usernames {
     }
 
     fun u64_to_string(num: u64): String {
-        let num = num;
+        if (num == 0) {
+            return string::utf8(b"0");
+        };
+
         let bytes: vector<u8> = vector[];
 
         while (num > 0) {
