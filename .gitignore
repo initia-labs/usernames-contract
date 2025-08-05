@@ -7,3 +7,4 @@
 
 # Move build result
 **/build
+.coverage_map.mvcov
