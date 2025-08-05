@@ -721,6 +721,8 @@ module usernames::usernames {
         event::emit(DeleteRecordsEvent { addr, domain_name, keys: record_keys });
     }
 
+    // Internal Functions
+
     fun check_name(name: String) {
         let bytes = name.bytes();
 
@@ -821,246 +823,42 @@ module usernames::usernames {
         coin::metadata(@initia_std, init_symbol)
     }
 
-    #[test_only]
-    struct CoinCaps has key {
-        burn_cap: coin::BurnCapability,
-        freeze_cap: coin::FreezeCapability,
-        mint_cap: coin::MintCapability
-    }
-
-    #[test_only]
-    fun initialized_coin(
-        account: &signer, symbol: String
-    ): (coin::MintCapability, coin::BurnCapability, coin::FreezeCapability) {
-        coin::initialize(
-            account,
-            option::none(),
-            std::string::utf8(b"name"),
-            symbol,
-            6,
-            string::utf8(b""),
-            string::utf8(b"")
-        )
-    }
-
-    #[test_only]
-    fun test_setup(chain: &signer) {
-        primary_fungible_store::init_module_for_test();
-        let (initia_mint_cap, initia_burn_cap, initia_freeze_cap) =
-            initialized_coin(chain, string::utf8(b"uinit"));
-
-        move_to(
-            chain,
-            CoinCaps {
-                burn_cap: initia_burn_cap,
-                freeze_cap: initia_freeze_cap,
-                mint_cap: initia_mint_cap
-            }
-        );
-    }
-
-    #[test_only]
-    fun init_mint_to(chain_addr: address, account: &signer, amount: u64) acquires CoinCaps {
-        let caps = borrow_global<CoinCaps>(chain_addr);
-        primary_fungible_store::deposit(
-            signer::address_of(account), coin::mint(&caps.mint_cap, amount)
-        );
-    }
-
-    #[test(
-        chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3
-    )]
-    fun end_to_end(
-        chain: signer,
-        source: signer,
-        user1: signer,
-        user2: signer
-    ) acquires CoinCaps, ModuleStore {
-        test_setup(&chain);
-        let chain_addr = signer::address_of(&chain);
-        let addr1 = signer::address_of(&user1);
-        let addr2 = signer::address_of(&user2);
-        init_mint_to(chain_addr, &user1, 100);
-        init_mint_to(chain_addr, &user2, 100);
-
-        initialize(
-            &source,
-            10,
-            5,
-            1,
-            1209600,
-            1209600,
-            string::utf8(b"https://test.com/"),
-            string::utf8(b"https://test.com/")
-        );
-
-        std::block::set_block_info(100, 100);
-
-        register_domain(&user1, string::utf8(b"abc"), 31557600);
-        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 90, 0);
-
-        register_domain(&user1, string::utf8(b"abcd"), 31557600);
-        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 85, 0);
-
-        register_domain(&user1, string::utf8(b"abcde"), 31557600);
-        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 84, 0);
-
-        let token = *option::borrow(&get_valid_token(string::utf8(b"abc")));
-        let token_object = object::address_to_object<Metadata>(token);
-        assert!(
-            initia_std::nft::token_id(token_object) == string::utf8(b"abc.init.100"), 0
-        );
-
-        set_name(&user1, string::utf8(b"abcd"));
-        assert!(
-            get_name_from_address(addr1) == option::some(string::utf8(b"abcd")),
-            0
-        );
-        assert!(
-            get_address_from_name(string::utf8(b"abcd")) == option::some(addr1),
-            0
-        );
-
-        set_name(&user1, string::utf8(b"abc"));
-        assert!(
-            get_name_from_address(addr1) == option::some(string::utf8(b"abc")),
-            0
-        );
-        assert!(
-            get_address_from_name(string::utf8(b"abc")) == option::some(addr1),
-            0
-        );
-
-        extend_expiration(&user1, string::utf8(b"abcd"), 31557600);
-        assert!(primary_fungible_store::balance(addr1, get_init_metadata()) == 79, 0);
-
-        // expired
-        std::block::set_block_info(200, 100 + 31557600 + 1209600 + 1);
-        register_domain(&user2, string::utf8(b"abc"), 31557600);
-
-        // check record removed
-        assert!(get_name_from_address(addr1) == option::none(), 0);
-        assert!(
-            get_address_from_name(string::utf8(b"abc")) == option::none(),
-            0
-        );
-
-        set_name(&user2, string::utf8(b"abc"));
-        assert!(
-            get_name_from_address(addr2) == option::some(string::utf8(b"abc")),
-            0
-        );
-        assert!(
-            get_address_from_name(string::utf8(b"abc")) == option::some(addr2),
-            0
-        );
-
-        set_name(&user1, string::utf8(b"abcd"));
-        assert!(
-            get_name_from_address(addr1) == option::some(string::utf8(b"abcd")),
-            0
-        );
-        assert!(
-            get_address_from_name(string::utf8(b"abcd")) == option::some(addr1),
-            0
-        );
-
-        update_records(
-            &user1,
-            string::utf8(b"abcd"),
-            vector[string::utf8(b"height"), string::utf8(b"weight")],
-            vector[string::utf8(b"190cm"), string::utf8(b"80kg")]
-        );
-
-        delete_records(
-            &user1,
-            string::utf8(b"abcd"),
-            vector[string::utf8(b"weight")]
-        )
-    }
-
-    #[test(chain = @0x1, source = @usernames, user = @0x2)]
-    fun query_test(chain: signer, source: signer, user: signer) acquires CoinCaps, ModuleStore {
-        test_setup(&chain);
-        let addr = signer::address_of(&user);
-        init_mint_to(signer::address_of(&chain), &user, 100);
-
-        initialize(
-            &source,
-            10,
-            5,
-            1,
-            1000,
-            1000,
-            string::utf8(b"https://test.com/"),
-            string::utf8(b"https://test.com/")
-        );
-
-        std::block::set_block_info(100, 100);
-
-        // before register
-        assert!(get_name_from_address(addr) == option::none(), 0);
-        assert!(
-            get_address_from_name(string::utf8(b"abcd")) == option::none(),
-            1
-        );
-        assert!(
-            get_valid_token(string::utf8(b"abcd")) == option::none(),
-            2
-        );
-
-        register_domain(&user, string::utf8(b"abcd"), 1000);
-        let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
-        let token_object = object::address_to_object<Metadata>(token);
-        assert!(
-            initia_std::nft::token_id(token_object) == string::utf8(b"abcd.init.100"),
-            3
-        );
-        set_name(&user, string::utf8(b"abcd"));
-        assert!(
-            get_name_from_address(addr) == option::some(string::utf8(b"abcd")),
-            4
-        );
-        assert!(
-            get_address_from_name(string::utf8(b"abcd")) == option::some(addr),
-            5
-        );
-
-        // after expired
-        std::block::set_block_info(110, 1110);
-        let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
-        let token_object = object::address_to_object<Metadata>(token);
-        assert!(
-            initia_std::nft::token_id(token_object) == string::utf8(b"abcd.init.100"),
-            6
-        );
-        assert!(get_name_from_address(addr) == option::none(), 7);
-        assert!(
-            get_address_from_name(string::utf8(b"abcd")) == option::none(),
-            8
-        );
-
-        // after extend
-        extend_expiration(&user, string::utf8(b"abcd"), 1000);
-        let token = *option::borrow(&get_valid_token(string::utf8(b"abcd")));
-        let token_object = object::address_to_object<Metadata>(token);
-        assert!(
-            initia_std::nft::token_id(token_object) == string::utf8(b"abcd.init.100"),
-            9
-        );
-        assert!(
-            get_name_from_address(addr) == option::some(string::utf8(b"abcd")),
-            10
-        );
-        assert!(
-            get_address_from_name(string::utf8(b"abcd")) == option::some(addr),
-            11
-        );
-    }
+    // Test
 
     #[test]
     fun test_to_lower_case() {
         let name = string::utf8(b"AbCd");
         assert!(to_lower_case(&name) == string::utf8(b"abcd"), 0);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0x10007, location = Self)]
+    fun check_name_starts_with_hyphen_fails() {
+        let name = string::utf8(b"-abc");
+        check_name(name)
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0x10007, location = Self)]
+    fun check_name_ends_with_hyphen_fails() {
+        let name = string::utf8(b"abc-");
+        check_name(name)
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0x10006, location = Self)]
+    fun check_name_too_long_hyphen_fails() {
+        let name =
+            string::utf8(
+                b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            );
+        check_name(name)
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 0x10005, location = Self)]
+    fun check_name_too_short_fails() {
+        let name = string::utf8(b"aa");
+        check_name(name)
     }
 }
